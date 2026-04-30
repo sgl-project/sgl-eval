@@ -176,10 +176,10 @@ def _build_progress(
         cum = {"correct": 0.0, "total": 0}
 
         def tick(_rep_idx: int, score: float) -> None:
-            bar.update(1)
             cum["correct"] += float(score)
             cum["total"] += 1
-            bar.set_postfix({"acc": f"{cum['correct'] / cum['total']:.1%}"}, refresh=False)
+            bar.set_postfix({"acc": f"{cum['correct'] / cum['total']:.2%}"}, refresh=False)
+            bar.update(1)
 
         return [bar], tick
 
@@ -209,20 +209,20 @@ def _build_progress(
 
     def tick(rep_idx: int, score: float) -> None:
         if 0 <= rep_idx < len(rep_bars):
-            rep_bars[rep_idx].update(1)
             rep_correct[rep_idx] += float(score)
             rep_total[rep_idx] += 1
             rep_bars[rep_idx].set_postfix(
-                {"acc": f"{rep_correct[rep_idx] / rep_total[rep_idx]:.1%}"},
+                {"acc": f"{rep_correct[rep_idx] / rep_total[rep_idx]:.2%}"},
                 refresh=False,
             )
-        overall_bar.update(1)
+            rep_bars[rep_idx].update(1)
         overall_correct[0] += float(score)
         overall_total[0] += 1
         overall_bar.set_postfix(
-            {"acc": f"{overall_correct[0] / overall_total[0]:.1%}"},
+            {"acc": f"{overall_correct[0] / overall_total[0]:.2%}"},
             refresh=False,
         )
+        overall_bar.update(1)
 
     return rep_bars + [overall_bar], tick
 
