@@ -172,7 +172,7 @@ def _build_progress(
         return [], lambda _idx, _score: None
 
     if n_repeats <= 1:
-        bar = tqdm(total=num_examples, desc=name)
+        bar = tqdm(total=num_examples, desc=name, dynamic_ncols=True)
         cum = {"correct": 0.0, "total": 0}
 
         def tick(_rep_idx: int, score: float) -> None:
@@ -191,6 +191,7 @@ def _build_progress(
             desc=f"{name} rep {i + 1:>{width}}/{n_repeats}",
             position=i,
             leave=True,
+            dynamic_ncols=True,
         )
         for i in range(n_repeats)
     ]
@@ -200,6 +201,7 @@ def _build_progress(
         desc=f"{name} {overall_label}",
         position=n_repeats,
         leave=True,
+        dynamic_ncols=True,
     )
 
     rep_correct = [0.0] * n_repeats
