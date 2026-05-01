@@ -1,21 +1,36 @@
-"""Metric output. Writes a single JSON file per run plus a stdout summary."""
+"""Metric output. Writes ``metrics.json`` per run plus a stdout summary.
+
+A run lives in its own directory (``<out>/sgl_eval_<name>_<stamp>/``) which
+also holds the streaming ``output-rs{i}.jsonl`` prediction files written by
+``PredictionsWriter``.
+"""
 
 from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from sgl_eval.types import RunResult
 
 
-def dump_run(result: RunResult, out_dir: str | os.PathLike | None = None) -> Path:
-    out_dir = Path(out_dir or "/tmp")
+def dump_run(
+    result: RunResult,
+    out_dir: str | os.PathLike,
+    *,
+    run_meta: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """Write ``metrics.json`` into ``out_dir`` (the per-run folder).
+
+    ``run_meta`` is merged into the top-level payload alongside the
+    aggregate -- intended for endpoint / model / sampling config /
+    sgl-eval + NS provenance, anything that helps a future reader
+    reproduce the run.
+    """
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    path = out_dir / f"sgl_eval_{result.name}_{stamp}.json"
+    path = out_dir / "metrics.json"
     payload: Dict[str, Any] = {
         "name": result.name,
         "num_examples": result.num_examples,
@@ -26,7 +41,9 @@ def dump_run(result: RunResult, out_dir: str | os.PathLike | None = None) -> Pat
         "total_prompt_tokens": result.total_prompt_tokens,
         "aggregate": result.aggregate,
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    if run_meta:
+        payload.update(run_meta)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
     return path
 
 
