@@ -4,8 +4,8 @@ Covers what users depend on:
   - YAML loads into a strict schema (typo'd keys raise, not silently dropped)
   - ``benchmark`` is required; everything else optional
   - resolve_preset_path: name vs explicit path
-  - CLI > preset > spec default priority via the ``_pick`` chain inside
-    ``_resolve_gen`` (re-implemented here so we don't have to spin up the
+  - CLI > preset > spec default priority via the ``pick`` chain inside
+    ``apply_to_gen`` (re-implemented here so we don't have to spin up the
     full CLI to test the merge logic)
 """
 
@@ -16,15 +16,16 @@ from pathlib import Path
 
 import pytest
 
-from sgl_eval.cli import _pick, _resolve_gen
 from sgl_eval.preset import (
     PRESET_ROOT,
     Endpoint,
     Expected,
     Preset,
     Sampling,
+    apply_to_gen,
     list_presets,
     load_preset,
+    pick,
     resolve_preset_path,
 )
 from sgl_eval.types import GenConfig
@@ -153,25 +154,25 @@ def test_list_presets_finds_yaml_and_yml(tmp_path: Path, monkeypatch: pytest.Mon
     assert "ignore.txt" not in found
 
 
-# ---------- _pick semantics ----------
+# ---------- pick semantics ----------
 
 
 def test_pick_first_non_none_wins() -> None:
-    assert _pick(None, "preset", "default") == "preset"
-    assert _pick("cli", "preset", "default") == "cli"
-    assert _pick(None, None, "default") == "default"
-    assert _pick(None, None, None) is None
+    assert pick(None, "preset", "default") == "preset"
+    assert pick("cli", "preset", "default") == "cli"
+    assert pick(None, None, "default") == "default"
+    assert pick(None, None, None) is None
 
 
 def test_pick_treats_zero_as_set() -> None:
     """0 / 0.0 / False are valid signals (e.g. temperature=0.0 greedy)
     -- must not be confused with ``None`` the way ``or`` would."""
-    assert _pick(0.0, 1.0, 2.0) == 0.0
-    assert _pick(False, True, True) is False
-    assert _pick(0, 100, 200) == 0
+    assert pick(0.0, 1.0, 2.0) == 0.0
+    assert pick(False, True, True) is False
+    assert pick(0, 100, 200) == 0
 
 
-# ---------- _resolve_gen priority ----------
+# ---------- apply_to_gen priority ----------
 
 
 def _args(**overrides) -> argparse.Namespace:
@@ -184,24 +185,24 @@ def _preset_with(**sampling) -> Preset:
     return Preset(benchmark="x", sampling=Sampling(**sampling))
 
 
-def test_resolve_gen_no_preset_falls_back_to_default() -> None:
+def test_apply_to_gen_no_preset_falls_back_to_default() -> None:
     default = GenConfig(temperature=0.0, top_p=0.95, max_tokens=None)
-    gen = _resolve_gen(default, preset=None, args=_args())
+    gen = apply_to_gen(default, preset=None, args=_args())
     assert gen.temperature == 0.0
     assert gen.top_p == 0.95
     assert gen.max_tokens is None
 
 
-def test_resolve_gen_preset_overrides_default() -> None:
+def test_apply_to_gen_preset_overrides_default() -> None:
     default = GenConfig(temperature=0.0, top_p=0.95)
-    gen = _resolve_gen(default, preset=_preset_with(temperature=1.0), args=_args())
+    gen = apply_to_gen(default, preset=_preset_with(temperature=1.0), args=_args())
     assert gen.temperature == 1.0
     assert gen.top_p == 0.95  # preset didn't override, falls to default
 
 
-def test_resolve_gen_cli_overrides_preset() -> None:
+def test_apply_to_gen_cli_overrides_preset() -> None:
     default = GenConfig(temperature=0.0)
-    gen = _resolve_gen(
+    gen = apply_to_gen(
         default,
         preset=_preset_with(temperature=1.0),
         args=_args(temperature=0.6),
@@ -209,20 +210,20 @@ def test_resolve_gen_cli_overrides_preset() -> None:
     assert gen.temperature == 0.6
 
 
-def test_resolve_gen_thinking_priority() -> None:
+def test_apply_to_gen_thinking_priority() -> None:
     default = GenConfig(chat_template_kwargs={"thinking": False})
     # CLI explicit beats preset
-    gen = _resolve_gen(default, _preset_with(thinking=True), _args(thinking=False))
+    gen = apply_to_gen(default, _preset_with(thinking=True), _args(thinking=False))
     assert gen.chat_template_kwargs == {"thinking": False}
     # Preset beats default
-    gen = _resolve_gen(default, _preset_with(thinking=True), _args())
+    gen = apply_to_gen(default, _preset_with(thinking=True), _args())
     assert gen.chat_template_kwargs == {"thinking": True}
     # No preset, no CLI -> default kept
-    gen = _resolve_gen(default, None, _args())
+    gen = apply_to_gen(default, None, _args())
     assert gen.chat_template_kwargs == {"thinking": False}
 
 
-def test_resolve_gen_preserves_default_only_fields() -> None:
+def test_apply_to_gen_preserves_default_only_fields() -> None:
     """``reasoning_effort`` / ``extra_body`` / ``seed`` / ``system_message``
     aren't preset/CLI overridable yet -- the default must round-trip."""
     default = GenConfig(
@@ -231,7 +232,7 @@ def test_resolve_gen_preserves_default_only_fields() -> None:
         seed=42,
         system_message="hello",
     )
-    gen = _resolve_gen(default, _preset_with(temperature=1.0), _args())
+    gen = apply_to_gen(default, _preset_with(temperature=1.0), _args())
     assert gen.reasoning_effort == "high"
     assert gen.extra_body == {"foo": "bar"}
     assert gen.seed == 42

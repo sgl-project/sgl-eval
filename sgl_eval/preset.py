@@ -8,16 +8,32 @@ precedence -- a preset is a starting point, not a lock.
 The schema is intentionally narrow: anything that doesn't change the
 identity of "the run we're trying to reproduce" stays out (api_key,
 num_threads, out_dir).
+
+This module is the single source of truth for everything preset-related:
+
+  - the dataclass schema + strict YAML loader
+  - the ``--preset`` CLI flag and the ``preset list/show`` subcommand
+  - the ``CLI > preset > spec default`` resolution chain
+  - the ``preset`` provenance block written into ``metrics.json``
+  - the post-run "Expected: X% Got: Y%" comparison print
+
+``cli.py`` only wires it via ``add_preset_run_flag`` /
+``register_preset_subcommand`` / ``resolve_run_inputs`` / ``make_run_meta_block``
+/ ``print_expected_vs_actual``.
 """
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
+
+from sgl_eval.types import GenConfig
 
 PRESET_ROOT = Path.home() / ".sgl_eval" / "presets"
 
@@ -115,3 +131,179 @@ def list_presets() -> List[Path]:
     if not PRESET_ROOT.exists():
         return []
     return sorted([*PRESET_ROOT.glob("*.yaml"), *PRESET_ROOT.glob("*.yml")])
+
+
+# ---------- CLI integration ----------
+#
+# Kept inside this module (not in cli.py) so the preset feature is a single
+# self-contained unit: schema + load + override-priority + CLI surface.
+
+
+def add_preset_run_flag(p_run: argparse.ArgumentParser) -> None:
+    """Add ``--preset`` to ``sgl-eval run``."""
+    p_run.add_argument(
+        "--preset",
+        default=None,
+        help="preset name (under ~/.sgl_eval/presets/) or path to a preset .yaml; "
+        "CLI flags always override preset values",
+    )
+
+
+def register_preset_subcommand(sub: Any) -> None:
+    """Register the top-level ``preset`` subcommand and its ``list``/``show``
+    children on the main argparse subparsers."""
+    p_preset = sub.add_parser("preset", help="manage saved presets")
+    preset_sub = p_preset.add_subparsers(dest="preset_cmd", required=True)
+    p_list = preset_sub.add_parser("list", help=f"list presets in {PRESET_ROOT}")
+    p_list.set_defaults(func=_cmd_preset_list)
+    p_show = preset_sub.add_parser("show", help="print a preset's content")
+    p_show.add_argument("name", help="preset name (under PRESET_ROOT) or path")
+    p_show.set_defaults(func=_cmd_preset_show)
+
+
+def _cmd_preset_list(args: argparse.Namespace) -> int:
+    paths = list_presets()
+    if not paths:
+        print(f"(no presets in {PRESET_ROOT})")
+        return 0
+    width = max(len(p.stem) for p in paths)
+    for p in paths:
+        print(f"  {p.stem:<{width}s}  ({p})")
+    return 0
+
+
+def _cmd_preset_show(args: argparse.Namespace) -> int:
+    path = resolve_preset_path(args.name)
+    if not path.exists():
+        print(f"preset not found: {path}", file=sys.stderr)
+        return 1
+    text = path.read_text(encoding="utf-8")
+    sys.stdout.write(text if text.endswith("\n") else text + "\n")
+    return 0
+
+
+# ---------- override priority resolution ----------
+
+
+def pick(*candidates: Any) -> Any:
+    """First non-``None`` candidate wins. Used for the
+    ``CLI > preset > default`` resolution chain so that ``0`` /
+    ``0.0`` / ``False`` aren't mistaken for "unset" the way ``or`` would."""
+    for c in candidates:
+        if c is not None:
+            return c
+    return None
+
+
+def apply_to_gen(
+    default: GenConfig, preset: Optional["Preset"], args: argparse.Namespace
+) -> GenConfig:
+    """Resolve a final ``GenConfig`` honoring CLI > preset > default.
+
+    ``args`` must expose ``temperature``, ``top_p``, ``max_tokens``,
+    ``thinking`` (any of which may be ``None`` for "unset").
+    """
+    p = preset.sampling if preset else None
+    chat_template_kwargs = dict(default.chat_template_kwargs or {})
+    thinking = pick(args.thinking, p.thinking if p else None)
+    if thinking is not None:
+        chat_template_kwargs["thinking"] = thinking
+    return GenConfig(
+        temperature=pick(args.temperature, p.temperature if p else None, default.temperature),
+        top_p=pick(args.top_p, p.top_p if p else None, default.top_p),
+        max_tokens=pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
+        reasoning_effort=default.reasoning_effort,
+        chat_template_kwargs=chat_template_kwargs or None,
+        extra_body=default.extra_body,
+        seed=default.seed,
+        system_message=default.system_message,
+    )
+
+
+@dataclass
+class ResolvedRunInputs:
+    """One-shot view of every value ``cmd_run`` needs after CLI > preset >
+    default resolution. Avoids spreading ``pick(...)`` calls through the
+    CLI body."""
+
+    benchmark: str
+    base_url: str
+    model: Optional[str]
+    n_repeats: int
+    num_examples: Optional[int]
+    gen: GenConfig
+    preset: Optional["Preset"]
+
+
+def resolve_run_inputs(
+    args: argparse.Namespace,
+    spec_lookup: Callable[[str], Any],
+) -> ResolvedRunInputs:
+    """Apply CLI > preset > spec default to every run-level setting.
+
+    ``spec_lookup`` is ``registry.get`` (or compatible); injected so this
+    module stays free of ``registry`` import. Exits the process via
+    ``sys.exit`` on missing benchmark or base_url -- same UX the CLI had
+    before this refactor.
+    """
+    preset = load_preset(args.preset) if args.preset else None
+    benchmark = pick(args.name, preset.benchmark if preset else None)
+    if not benchmark:
+        sys.exit("error: benchmark name required (positional arg or --preset)")
+    spec = spec_lookup(benchmark)
+
+    base_url = pick(args.base_url, preset.endpoint.base_url if preset else None)
+    if not base_url:
+        sys.exit("error: --base-url required (or set in preset endpoint.base_url)")
+
+    return ResolvedRunInputs(
+        benchmark=spec.name,
+        base_url=base_url,
+        model=pick(args.model, preset.endpoint.model if preset else None),
+        n_repeats=pick(
+            args.n_repeats,
+            preset.n_repeats if preset else None,
+            spec.default_n_repeats,
+        ),
+        num_examples=pick(args.num_examples, preset.num_examples if preset else None),
+        gen=apply_to_gen(spec.default_gen, preset, args),
+        preset=preset,
+    )
+
+
+# ---------- run-time integration ----------
+
+
+def make_run_meta_block(
+    args: argparse.Namespace, preset: Optional["Preset"]
+) -> Optional[Dict[str, Any]]:
+    """The ``preset`` sub-dict for ``metrics.json``'s ``run_meta``. Returns
+    ``None`` when no preset was used (caller should ``if block: meta["preset"] = block``)
+    so absent presets don't show up as ``"preset": null``."""
+    if preset is None:
+        return None
+    return {
+        "spec": args.preset,
+        "path": str(resolve_preset_path(args.preset)) if args.preset else None,
+        "benchmark": preset.benchmark,
+        "expected_score": preset.expected.score if preset.expected else None,
+    }
+
+
+def print_expected_vs_actual(result: Any, preset: Optional["Preset"]) -> None:
+    """Print headline-metric comparison if the preset declared one.
+    Informational only -- never affects exit code."""
+    if preset is None or preset.expected is None or preset.expected.score is None:
+        return
+    expected_score = preset.expected.score
+    if result.n_repeats > 1 and "pass@1" in result.aggregate:
+        actual = result.aggregate["pass@1"]
+    else:
+        actual = result.aggregate.get("score", 0.0)
+    delta = actual - expected_score
+    sign = "+" if delta >= 0 else ""
+    print(
+        f"\nExpected: {expected_score * 100:.2f}%  "
+        f"Got: {actual * 100:.2f}%  "
+        f"(delta {sign}{delta * 100:.2f}%)"
+    )
