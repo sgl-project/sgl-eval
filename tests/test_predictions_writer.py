@@ -32,6 +32,7 @@ def test_writes_ns_shape_record(tmp_path: Path) -> None:
     rows = [json.loads(line) for line in (tmp_path / "output-rs0.jsonl").read_text().splitlines()]
     assert len(rows) == 1
     r = rows[0]
+    assert r["id"] == "0"
     assert r["generation"] == "response-A"
     assert r["expected_answer"] == "0"
     assert r["problem"] == "q0"
@@ -83,6 +84,17 @@ def test_every_line_flush_visible_before_close(tmp_path: Path) -> None:
         assert [r["generation"] for r in rows] == ["first", "second"]
     finally:
         w.close()
+
+
+def test_id_preserves_dataset_native_value(tmp_path: Path) -> None:
+    """``Example.id`` is set by the loader from the dataset row's native
+    ``id`` field (e.g. ``aime24-0``). It must round-trip into the JSONL
+    so partial-resume / sub-sampling can dedupe on it."""
+    native = Example(id="aime24-7", inputs={"problem": "P"}, target="42")
+    with PredictionsWriter(tmp_path, n_repeats=1) as w:
+        w(native, 0, _sample("ans"), 1.0, "42")
+    row = json.loads((tmp_path / "output-rs0.jsonl").read_text().splitlines()[0])
+    assert row["id"] == "aime24-7"
 
 
 def test_close_is_idempotent(tmp_path: Path) -> None:
