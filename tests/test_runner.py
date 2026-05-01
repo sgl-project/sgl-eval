@@ -2,10 +2,12 @@
 
 Verifies the runner: parallel sample_fn, inline per-sample score_one_fn,
 default mean aggregator, completion-token tally, n_repeats * num_examples
-parallelism.
+parallelism, on_sample_scored callback contract.
 """
 
 from __future__ import annotations
+
+import threading
 
 from sgl_eval.runner import run_examples
 from sgl_eval.types import Example, Sample
@@ -79,3 +81,35 @@ def test_runner_n_repeats_flat_concurrency():
     assert result.n_repeats == 8
     assert len(submitted) == 4 * 8
     assert result.total_completion_tokens == 4 * 8
+
+
+def test_runner_invokes_on_sample_scored():
+    """Callback fires once per ``(example, repeat)`` with the scored
+    sample, score, and extracted answer -- this is the streaming-dump hook."""
+    examples = [Example(id=str(i), inputs={}, target=str(i)) for i in range(3)]
+
+    received = []
+    lock = threading.Lock()
+
+    def cb(ex, rep, sample, score, extracted):
+        with lock:
+            received.append((ex.id, rep, sample.text, score, extracted))
+
+    result = run_examples(
+        "dummy",
+        examples,
+        _fake_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=4,
+        n_repeats=2,
+        progress=False,
+        on_sample_scored=cb,
+    )
+
+    assert len(received) == 3 * 2
+    assert {(eid, rep) for eid, rep, _, _, _ in received} == {
+        (str(i), r) for i in range(3) for r in range(2)
+    }
+    assert all(s == 1.0 for _, _, _, s, _ in received)
+    assert all(extracted == str(eid) for eid, _, _, _, extracted in received)
+    assert result.aggregate["score"] == 1.0

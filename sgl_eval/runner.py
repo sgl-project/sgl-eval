@@ -35,6 +35,9 @@ from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 TickFn = Callable[[int, float], None]
 SampleFn = Callable[..., Sample]
 ScoreOneFn = Callable[[Example, Sample], Tuple[float, Optional[str]]]
+# Called once per (example, repeat) immediately after scoring, on whatever
+# thread completed the future. Implementations must be thread-safe.
+OnSampleScoredFn = Callable[[Example, int, Sample, float, Optional[str]], None]
 
 
 def run_examples(
@@ -46,6 +49,7 @@ def run_examples(
     n_repeats: int = 1,
     aggregate_fn: Optional[Callable[[List[ExampleResult]], Dict[str, float]]] = None,
     progress: bool = True,
+    on_sample_scored: Optional[OnSampleScoredFn] = None,
 ) -> RunResult:
     debug_serial = os.getenv("SGL_EVAL_DEBUG") == "1"
     total_samples = len(examples) * max(n_repeats, 1)
@@ -75,6 +79,7 @@ def run_examples(
             ex_by_id=ex_by_id,
             workers=workers,
             tick=tick,
+            on_sample_scored=on_sample_scored,
         )
         results = _assemble_results(examples, samples_by_ex, scores_by_ex, extracted_by_ex)
     finally:
@@ -120,6 +125,7 @@ def _run_sample_score_phase(
     ex_by_id: Dict[str, Example],
     workers: int,
     tick: TickFn,
+    on_sample_scored: Optional[OnSampleScoredFn],
 ) -> None:
     if workers == 1:
         for ex, rep in tasks:
@@ -128,6 +134,8 @@ def _run_sample_score_phase(
             score, extracted = score_one_fn(ex, sample)
             scores_by_ex[ex.id][rep] = score
             extracted_by_ex[ex.id][rep] = extracted
+            if on_sample_scored is not None:
+                on_sample_scored(ex, rep, sample, score, extracted)
             tick(rep, score)
         return
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -140,6 +148,8 @@ def _run_sample_score_phase(
             score, extracted = score_one_fn(ex, sample)
             scores_by_ex[ex_id][rep] = score
             extracted_by_ex[ex_id][rep] = extracted
+            if on_sample_scored is not None:
+                on_sample_scored(ex, rep, sample, score, extracted)
             tick(rep, score)
 
 
