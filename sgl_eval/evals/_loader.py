@@ -20,12 +20,11 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from sgl_eval import VENDORED_NS_ROOT
 from sgl_eval.types import Example
 
 _CACHE_ROOT = Path.home() / ".cache" / "sgl_eval"
-_VENDORED_DATASET_ROOT = (
-    Path(__file__).resolve().parent.parent / "_vendored" / "nemo_skills" / "dataset"
-)
+_VENDORED_DATASET_ROOT = VENDORED_NS_ROOT / "dataset"
 
 
 def _row_to_example(row: dict, idx: int, name: str) -> Example:

@@ -15,6 +15,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import yaml
+
+from sgl_eval import VENDORED_NS_ROOT
 from sgl_eval import __version__ as _SGL_EVAL_VERSION
 from sgl_eval.evals._predictions import PredictionsWriter
 from sgl_eval.metrics import dump_run, format_summary
@@ -154,7 +157,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     metrics_path = dump_run(result, run_dir, run_meta=run_meta)
     print(f"\nMetrics: {metrics_path}")
     if writer is not None:
-        print(f"Predictions: {run_dir}/output-rs*.jsonl  ({n_repeats} file(s))")
+        print(f"Predictions: {run_dir}  ({n_repeats} jsonl file(s))")
     return 0
 
 
@@ -173,17 +176,16 @@ def _build_run_meta(
 
 
 def _read_ns_commit_sha() -> Optional[str]:
-    """Vendored slice's pinned upstream SHA (``SOURCES.yaml``). Failures
-    return ``None`` so a corrupt / missing manifest doesn't kill the run."""
+    """Vendored slice's pinned upstream SHA (``SOURCES.yaml``). Returns
+    ``None`` only when the manifest is absent (e.g. running from a non-
+    standard checkout); a malformed manifest is a sync_vendored bug and
+    should surface as a YAMLError, not be swallowed."""
+    manifest = VENDORED_NS_ROOT / "SOURCES.yaml"
     try:
-        import yaml
-
-        manifest = (
-            Path(__file__).parent / "_vendored" / "nemo_skills" / "SOURCES.yaml"
-        ).read_text()
-        return yaml.safe_load(manifest).get("synced_from_sha")
-    except Exception:
+        text = manifest.read_text()
+    except FileNotFoundError:
         return None
+    return yaml.safe_load(text).get("synced_from_sha")
 
 
 def _override_gen(default: GenConfig, args: argparse.Namespace) -> GenConfig:

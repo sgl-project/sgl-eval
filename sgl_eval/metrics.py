@@ -42,6 +42,11 @@ def dump_run(
         "aggregate": result.aggregate,
     }
     if run_meta:
+        # Reject overlap with core fields so a future caller can't silently
+        # clobber ``aggregate`` / ``name`` / etc. by reusing those keys.
+        overlap = run_meta.keys() & payload.keys()
+        if overlap:
+            raise ValueError(f"run_meta overlaps reserved metrics fields: {sorted(overlap)}")
         payload.update(run_meta)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
     return path
