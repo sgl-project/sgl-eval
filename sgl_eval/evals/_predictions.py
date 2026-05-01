@@ -24,7 +24,11 @@ from sgl_eval.types import Example, Sample
 def sample_to_pred(sample: Sample, example: Example) -> Dict[str, Any]:
     completion = sample.completion_tokens or 0
     reasoning = sample.reasoning_tokens or 0
+    # ``id`` mirrors NS upstream's native row shape (e.g. aime24/test.txt
+    # ships ``{"id": "aime24-0", ...}``) and keeps a stable per-problem
+    # key for partial-resume / sub-sampling on top of the JSONL dumps.
     pred: Dict[str, Any] = {
+        "id": example.id,
         "expected_answer": str(example.target),
         "num_generated_tokens": completion,
         "num_reasoning_tokens": reasoning,
