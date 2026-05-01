@@ -123,7 +123,7 @@ def _build_loader(entry: dict):
 def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Callable):
     if metrics_type == "math":
 
-        def run(*, sampler, gen, n_repeats, num_examples, num_threads):
+        def run(*, sampler, gen, n_repeats, num_examples, num_threads, predictions_writer=None):
             return run_math_benchmark(
                 name=name,
                 sampler=sampler,
@@ -132,13 +132,14 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
                 num_examples=num_examples,
                 num_threads=num_threads,
                 load_examples=loader,
+                predictions_writer=predictions_writer,
             )
 
         return run
     if metrics_type == "multichoice":
         prompt_yaml = vendored_prompt(prompt_basename)
 
-        def run(*, sampler, gen, n_repeats, num_examples, num_threads):
+        def run(*, sampler, gen, n_repeats, num_examples, num_threads, predictions_writer=None):
             return run_multichoice_benchmark(
                 name=name,
                 sampler=sampler,
@@ -148,6 +149,7 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
                 num_threads=num_threads,
                 load_examples=loader,
                 prompt_yaml=prompt_yaml,
+                predictions_writer=predictions_writer,
             )
 
         return run

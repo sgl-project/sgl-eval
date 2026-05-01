@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sgl_eval._vendored.nemo_skills.evaluator.math import MathEvaluator
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
-from sgl_eval.evals._predictions import sample_to_pred
+from sgl_eval.evals._predictions import PredictionsWriter, sample_to_pred
 from sgl_eval.evals._prompts import render_prompt, vendored_prompt
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples
 from sgl_eval.sampler import ChatCompletionSampler
@@ -102,6 +102,7 @@ def run_math_benchmark(
     num_threads: int,
     load_examples: Callable[[Optional[int]], List[Example]],
     evaluator_config: Optional[Dict[str, Any]] = None,
+    predictions_writer: Optional[PredictionsWriter] = None,
 ) -> RunResult:
     examples = load_examples(num_examples)
     evaluator = MathEvaluator(config=evaluator_config or {})
@@ -118,4 +119,5 @@ def run_math_benchmark(
         num_threads=num_threads,
         n_repeats=n_repeats,
         aggregate_fn=aggregator,
+        on_sample_scored=predictions_writer,
     )

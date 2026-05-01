@@ -24,7 +24,7 @@ _mcq_mod.tqdm = lambda iterable, **_kwargs: iterable
 
 from sgl_eval._vendored.nemo_skills.evaluator.mcq import eval_mcq  # noqa: E402
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics  # noqa: E402
-from sgl_eval.evals._predictions import sample_to_pred  # noqa: E402
+from sgl_eval.evals._predictions import PredictionsWriter, sample_to_pred  # noqa: E402
 from sgl_eval.evals._prompts import render_prompt  # noqa: E402
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples  # noqa: E402
 from sgl_eval.sampler import ChatCompletionSampler  # noqa: E402
@@ -118,6 +118,7 @@ def run_multichoice_benchmark(
     num_threads: int,
     load_examples: Callable[[Optional[int]], List[Example]],
     prompt_yaml: Path,
+    predictions_writer: Optional[PredictionsWriter] = None,
 ) -> RunResult:
     examples = load_examples(num_examples)
     sample_fn = make_sample_fn(sampler, gen, prompt_yaml)
@@ -133,4 +134,5 @@ def run_multichoice_benchmark(
         num_threads=num_threads,
         n_repeats=n_repeats,
         aggregate_fn=aggregator,
+        on_sample_scored=predictions_writer,
     )
