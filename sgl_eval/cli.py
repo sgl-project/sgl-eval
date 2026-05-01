@@ -1,9 +1,10 @@
 """``sgl-eval`` CLI entry point.
 
-Three subcommands:
+Subcommands:
   list                 enumerate registered benchmarks
   ping                 send one chat completion to the endpoint and print it
-  run <name>           run a benchmark end-to-end (filled in as benchmarks land)
+  run <name>           run a benchmark end-to-end
+  preset list/show     manage saved (model, dataset, sampling) presets
 """
 
 from __future__ import annotations
@@ -21,6 +22,13 @@ from sgl_eval import VENDORED_NS_ROOT
 from sgl_eval import __version__ as _SGL_EVAL_VERSION
 from sgl_eval.evals._predictions import PredictionsWriter
 from sgl_eval.metrics import dump_run, format_summary
+from sgl_eval.preset import (
+    PRESET_ROOT,
+    Preset,
+    list_presets,
+    load_preset,
+    resolve_preset_path,
+)
 from sgl_eval.registry import get, list_evals
 from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import GenConfig
@@ -48,8 +56,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_ping.set_defaults(func=cmd_ping)
 
     p_run = sub.add_parser("run", help="run a benchmark")
-    p_run.add_argument("name", help="benchmark name (see `sgl-eval list`)")
-    _add_endpoint_args(p_run)
+    p_run.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="benchmark name (see `sgl-eval list`); optional if --preset provides one",
+    )
+    p_run.add_argument(
+        "--preset",
+        default=None,
+        help="preset name (under ~/.sgl_eval/presets/) or path to a preset .yaml; "
+        "CLI flags always override preset values",
+    )
+    _add_endpoint_args(p_run, base_url_required=False)
     p_run.add_argument("--num-examples", type=int, default=None)
     p_run.add_argument("--num-threads", type=int, default=64)
     p_run.add_argument("--n-repeats", type=int, default=None)
@@ -76,13 +95,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     p_run.set_defaults(func=cmd_run, dump_predictions=True)
 
+    p_preset = sub.add_parser("preset", help="manage saved presets")
+    preset_sub = p_preset.add_subparsers(dest="preset_cmd", required=True)
+    p_preset_list = preset_sub.add_parser("list", help=f"list presets in {PRESET_ROOT}")
+    p_preset_list.set_defaults(func=cmd_preset_list)
+    p_preset_show = preset_sub.add_parser("show", help="print a preset's content")
+    p_preset_show.add_argument("name", help="preset name (under PRESET_ROOT) or path")
+    p_preset_show.set_defaults(func=cmd_preset_show)
+
     args = parser.parse_args(argv)
     return args.func(args)
 
 
-def _add_endpoint_args(p: argparse.ArgumentParser) -> None:
+def _add_endpoint_args(p: argparse.ArgumentParser, *, base_url_required: bool = True) -> None:
     p.add_argument(
-        "--base-url", required=True, help="OpenAI-compatible endpoint, e.g. http://host:30000/v1"
+        "--base-url",
+        required=base_url_required,
+        default=None,
+        help="OpenAI-compatible endpoint, e.g. http://host:30000/v1",
     )
     p.add_argument("--model", default=None, help="model id (defaults to first /v1/models entry)")
     p.add_argument("--api-key", default="EMPTY")
@@ -126,11 +156,28 @@ def cmd_ping(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    spec = get(args.name)
-    sampler = ChatCompletionSampler(base_url=args.base_url, model=args.model, api_key=args.api_key)
-    gen = _override_gen(spec.default_gen, args)
-    n_repeats = args.n_repeats if args.n_repeats is not None else spec.default_n_repeats
+    preset = load_preset(args.preset) if args.preset else None
 
+    # Resolve effective values. Priority: CLI flag > preset > spec default.
+    benchmark = _pick(args.name, preset.benchmark if preset else None)
+    if not benchmark:
+        sys.exit("error: benchmark name required (positional arg or --preset)")
+    spec = get(benchmark)
+
+    base_url = _pick(args.base_url, preset.endpoint.base_url if preset else None)
+    if not base_url:
+        sys.exit("error: --base-url required (or set in preset endpoint.base_url)")
+
+    model = _pick(args.model, preset.endpoint.model if preset else None)
+    n_repeats = _pick(
+        args.n_repeats,
+        preset.n_repeats if preset else None,
+        spec.default_n_repeats,
+    )
+    num_examples = _pick(args.num_examples, preset.num_examples if preset else None)
+    gen = _resolve_gen(spec.default_gen, preset, args)
+
+    sampler = ChatCompletionSampler(base_url=base_url, model=model, api_key=args.api_key)
     _warn_if_greedy_repeats(n_repeats, gen)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -144,7 +191,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             sampler=sampler,
             gen=gen,
             n_repeats=n_repeats,
-            num_examples=args.num_examples,
+            num_examples=num_examples,
             num_threads=args.num_threads,
             predictions_writer=writer,
         )
@@ -153,26 +200,123 @@ def cmd_run(args: argparse.Namespace) -> int:
             writer.close()
 
     print(format_summary(result))
-    run_meta = _build_run_meta(args=args, sampler=sampler, gen=gen, stamp=stamp)
+    run_meta = _build_run_meta(
+        args=args,
+        sampler=sampler,
+        gen=gen,
+        stamp=stamp,
+        base_url=base_url,
+        preset=preset,
+        preset_spec=args.preset,
+    )
     metrics_path = dump_run(result, run_dir, run_meta=run_meta)
     print(f"\nMetrics: {metrics_path}")
     if writer is not None:
         print(f"Predictions: {run_dir}  ({n_repeats} jsonl file(s))")
+    if preset and preset.expected and preset.expected.score is not None:
+        _print_expected_vs_actual(result, preset.expected.score)
     return 0
 
 
+def _pick(*candidates: Any) -> Any:
+    """First non-``None`` candidate wins. Used for the
+    ``CLI > preset > default`` resolution chain so that ``0`` /
+    ``0.0`` / ``False`` aren't mistaken for "unset" the way ``or``
+    would treat them."""
+    for c in candidates:
+        if c is not None:
+            return c
+    return None
+
+
+def _resolve_gen(
+    default: GenConfig, preset: Optional[Preset], args: argparse.Namespace
+) -> GenConfig:
+    p = preset.sampling if preset else None
+    chat_template_kwargs = dict(default.chat_template_kwargs or {})
+    thinking = _pick(args.thinking, p.thinking if p else None)
+    if thinking is not None:
+        chat_template_kwargs["thinking"] = thinking
+    return GenConfig(
+        temperature=_pick(args.temperature, p.temperature if p else None, default.temperature),
+        top_p=_pick(args.top_p, p.top_p if p else None, default.top_p),
+        max_tokens=_pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
+        reasoning_effort=default.reasoning_effort,
+        chat_template_kwargs=chat_template_kwargs or None,
+        extra_body=default.extra_body,
+        seed=default.seed,
+        system_message=default.system_message,
+    )
+
+
+def _print_expected_vs_actual(result: Any, expected_score: float) -> None:
+    """Headline metric: ``pass@1`` for k>1, plain ``score`` for k==1.
+    Informational only -- never affects exit code."""
+    if result.n_repeats > 1 and "pass@1" in result.aggregate:
+        actual = result.aggregate["pass@1"]
+    else:
+        actual = result.aggregate.get("score", 0.0)
+    delta = actual - expected_score
+    sign = "+" if delta >= 0 else ""
+    print(
+        f"\nExpected: {expected_score * 100:.2f}%  "
+        f"Got: {actual * 100:.2f}%  "
+        f"(delta {sign}{delta * 100:.2f}%)"
+    )
+
+
 def _build_run_meta(
-    *, args: argparse.Namespace, sampler: ChatCompletionSampler, gen: GenConfig, stamp: str
+    *,
+    args: argparse.Namespace,
+    sampler: ChatCompletionSampler,
+    gen: GenConfig,
+    stamp: str,
+    base_url: str,
+    preset: Optional[Preset] = None,
+    preset_spec: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    meta: Dict[str, Any] = {
         "timestamp": stamp,
         "model": sampler.model,
-        "base_url": args.base_url,
+        "base_url": base_url,
         "num_threads": args.num_threads,
         "gen": dataclasses.asdict(gen),
         "sgl_eval_version": _SGL_EVAL_VERSION,
         "ns_commit_sha": _read_ns_commit_sha(),
     }
+    if preset is not None:
+        # ``preset_spec`` is the user-provided arg (name or path); resolved
+        # path is more useful for provenance because it disambiguates same-
+        # named presets across machines.
+        meta["preset"] = {
+            "spec": preset_spec,
+            "path": str(resolve_preset_path(preset_spec)) if preset_spec else None,
+            "benchmark": preset.benchmark,
+            "expected_score": preset.expected.score if preset.expected else None,
+        }
+    return meta
+
+
+def cmd_preset_list(args: argparse.Namespace) -> int:
+    paths = list_presets()
+    if not paths:
+        print(f"(no presets in {PRESET_ROOT})")
+        return 0
+    width = max(len(p.stem) for p in paths)
+    for p in paths:
+        print(f"  {p.stem:<{width}s}  ({p})")
+    return 0
+
+
+def cmd_preset_show(args: argparse.Namespace) -> int:
+    path = resolve_preset_path(args.name)
+    if not path.exists():
+        print(f"preset not found: {path}", file=sys.stderr)
+        return 1
+    sys.stdout.write(path.read_text(encoding="utf-8"))
+    if not path.read_text(encoding="utf-8").endswith("\n"):
+        sys.stdout.write("\n")
+    return 0
 
 
 def _read_ns_commit_sha() -> Optional[str]:
@@ -186,22 +330,6 @@ def _read_ns_commit_sha() -> Optional[str]:
     except FileNotFoundError:
         return None
     return yaml.safe_load(text).get("synced_from_sha")
-
-
-def _override_gen(default: GenConfig, args: argparse.Namespace) -> GenConfig:
-    chat_template_kwargs = dict(default.chat_template_kwargs or {})
-    if args.thinking is not None:
-        chat_template_kwargs["thinking"] = args.thinking
-    return GenConfig(
-        temperature=args.temperature if args.temperature is not None else default.temperature,
-        top_p=args.top_p if args.top_p is not None else default.top_p,
-        max_tokens=args.max_tokens if args.max_tokens is not None else default.max_tokens,
-        reasoning_effort=default.reasoning_effort,
-        chat_template_kwargs=chat_template_kwargs or None,
-        extra_body=default.extra_body,
-        seed=default.seed,
-        system_message=default.system_message,
-    )
 
 
 def _warn_if_greedy_repeats(n_repeats: int, gen: GenConfig) -> None:
