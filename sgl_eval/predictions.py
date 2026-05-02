@@ -1,14 +1,17 @@
-"""Build prediction dicts that match upstream NeMo-Skills' wire shape.
+"""On-disk per-sample predictions: NS-shape dict mint + streaming JSONL R/W.
 
-Both ``MathEvaluator.eval_single`` (during sampling) and ``MathMetrics.update``
-(during aggregation) consume dicts with the same field set. We mint that dict
-once here and reuse it on both sides so the data we feed into vendored code
-matches the contract upstream's own ``inference/generate.py`` would produce.
+The ``output-rs{rep}.jsonl`` files are the canonical record of every
+scored sample in a run. They're a first-class data layer:
 
-``PredictionsWriter`` is the streaming on-disk counterpart: it sits behind
-``runner.run_examples``' ``on_sample_scored`` hook and appends one NS-shape
-JSON line per scored sample to ``output-rs{rep}.jsonl``, flushing after every
-write so a Ctrl-C / crash leaves all already-scored samples on disk.
+  - written live during a run via ``PredictionsWriter`` (behind the
+    runner's ``on_sample_scored`` hook),
+  - read back later via ``PredictionsReader`` for replay (re-aggregate
+    metrics without re-sampling) and offline analysis (flaky / timeout
+    breakdowns).
+
+``sample_to_pred`` mints the per-sample dict in NS wire shape, used both
+at sampling time (fed into ``MathEvaluator.eval_single``) and at
+aggregation time (fed into ``MathMetrics.update``).
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 from sgl_eval.types import Example, Sample
 
@@ -91,3 +94,56 @@ class PredictionsWriter:
 
     def __exit__(self, *exc: Any) -> None:
         self.close()
+
+
+class PredictionsReader:
+    """Read back ``output-rs{rep}.jsonl`` from a run directory.
+
+    Symmetric counterpart to ``PredictionsWriter``: same files, same
+    NS wire shape, just inverted. Used by ``sgl-eval replay`` to
+    re-aggregate metrics without re-sampling and by future analysis
+    paths (flaky-rate, timeout breakdown, etc.) that consume scored
+    predictions but don't touch the model.
+
+    Auto-detects ``n_repeats`` by counting ``output-rs*.jsonl`` files
+    in ``run_dir`` unless an explicit value is passed; the number is
+    locked at construction time so subsequent file changes don't surprise
+    in-flight iteration.
+    """
+
+    def __init__(self, run_dir: Path, n_repeats: Optional[int] = None) -> None:
+        self.run_dir = Path(run_dir)
+        self.n_repeats = n_repeats if n_repeats is not None else self._detect_n_repeats()
+
+    def _detect_n_repeats(self) -> int:
+        # Highest existing ``output-rs<N>.jsonl`` index + 1. Counting via
+        # glob would over-report if some rs files are missing (e.g. partial
+        # runs that aborted before any rep N sample completed).
+        max_idx = -1
+        for path in self.run_dir.glob("output-rs*.jsonl"):
+            stem = path.stem  # output-rs<N>
+            try:
+                idx = int(stem.removeprefix("output-rs"))
+            except ValueError:
+                continue
+            max_idx = max(max_idx, idx)
+        return max_idx + 1
+
+    def iter_rep(self, rep: int) -> Iterator[Dict[str, Any]]:
+        """Yield prediction dicts for one repeat, in on-disk order."""
+        path = self.run_dir / f"output-rs{rep}.jsonl"
+        if not path.exists():
+            return
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    yield json.loads(line)
+
+    def iter_all(self) -> Iterator[Tuple[int, Dict[str, Any]]]:
+        """Yield ``(rep, pred)`` over every repeat. Order is by rep then
+        on-disk; useful for analyses that don't care about cross-rep
+        grouping."""
+        for rep in range(self.n_repeats):
+            for pred in self.iter_rep(rep):
+                yield rep, pred
