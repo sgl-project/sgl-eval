@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sgl_eval.cli import _format_partial_summary, _score_bounds
+from sgl_eval.cli import _example_breakdown, _format_partial_summary, _score_bounds
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
 
@@ -70,12 +70,37 @@ def test_partial_summary_n_repeats_1():
 
 
 def test_partial_summary_n_repeats_gt_1():
-    """n_repeats>1 path uses sample-level progress; bounds still sample-level."""
-    # ex0 done all 3 reps (1 correct), ex1 done 1/3 reps (correct).
-    # 4/12 samples completed, 2 correct -> worst 16.67%, best 83.33%.
+    """n_repeats>1 path uses sample-level progress + example full/partial/
+    dropped breakdown; score bounds still sample-level."""
+    # planned_examples=4, n_repeats=3 -> 12 planned samples
+    # ex0: 3 reps done (full, 1 correct)
+    # ex1: 1 rep done (partial, 1 correct)
+    # ex2, ex3: missing from per_example -> dropped
     per_example = [_ex_result("0", [1.0, 0.0, 0.0]), _ex_result("1", [1.0])]
     result = _make_result(per_example, planned_examples=4, n_repeats=3)
     out = _format_partial_summary(result)
     assert "4 / 12 samples completed" in out
     assert "(8 unfinished, n_repeats=3)" in out
+    assert "examples: 1 full / 1 partial / 2 dropped (4 planned)" in out
     assert "score range: [16.67%, 83.33%]" in out
+
+
+def test_example_breakdown_buckets():
+    """full = all reps done, partial = some reps done, dropped = none done."""
+    per_example = [
+        _ex_result("a", [1.0, 1.0, 1.0]),  # full
+        _ex_result("b", [1.0, 1.0]),  # partial
+        _ex_result("c", [1.0]),  # partial
+    ]
+    # planned 5, only 3 in per_example -> 2 dropped
+    result = _make_result(per_example, planned_examples=5, n_repeats=3)
+    full, part, dropped = _example_breakdown(result)
+    assert (full, part, dropped) == (1, 2, 2)
+
+
+def test_example_breakdown_all_full():
+    """No partial, no dropped -- but partial=True flag could still fire if
+    e.g. another tracking field said so. Helper just buckets."""
+    per_example = [_ex_result("a", [1.0, 1.0]), _ex_result("b", [0.0, 1.0])]
+    result = _make_result(per_example, planned_examples=2, n_repeats=2)
+    assert _example_breakdown(result) == (2, 0, 0)
