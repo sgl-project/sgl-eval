@@ -1,11 +1,6 @@
-"""``sgl-eval refresh`` round-trip tests: write predictions, refresh,
-verify metrics.json is recomputed and provenance fields preserved.
-
-Uses ``aime24`` as the registered benchmark since it's bundled and the
-math aggregator path is the most-trafficked one. The actual problem text
-is fake -- refresh doesn't re-grade, it reads ``symbolic_correct`` straight
-from the jsonl rows.
-"""
+"""``sgl-eval refresh`` round-trip tests. Uses ``aime24`` (bundled, math
+category). Refresh doesn't re-grade -- it reads ``symbolic_correct`` from
+jsonl rows -- so problem text in fixtures is intentionally fake."""
 
 from __future__ import annotations
 
@@ -39,8 +34,7 @@ def _row(ex_id: str, correct: bool, tokens: int = 10, predicted: str = "x") -> d
 
 
 def test_refresh_round_trip_no_old_metrics(tmp_path: Path) -> None:
-    """Refresh works with only ``output-rs*.jsonl`` -- benchmark name is
-    parsed from the run-dir filename when ``metrics.json`` is absent."""
+    """No metrics.json -> benchmark name parsed from dirname."""
     run_dir = tmp_path / "sgl_eval_aime24_20260502-120000"
     run_dir.mkdir()
     _write_jsonl(
@@ -62,8 +56,7 @@ def test_refresh_round_trip_no_old_metrics(tmp_path: Path) -> None:
 
 
 def test_refresh_preserves_provenance_overwrites_aggregate(tmp_path: Path) -> None:
-    """Provenance (model / latency / ns_commit_sha / etc.) survives;
-    aggregate / token tally / partial fields get recomputed."""
+    """Provenance survives; aggregate / tokens / partial fields recomputed."""
     run_dir = tmp_path / "sgl_eval_aime24_20260502-120000"
     run_dir.mkdir()
     (run_dir / "metrics.json").write_text(
@@ -104,8 +97,8 @@ def test_refresh_preserves_provenance_overwrites_aggregate(tmp_path: Path) -> No
 
 
 def test_refresh_partial_emits_score_bounds(tmp_path: Path) -> None:
-    """Old metrics knew planned=3 but only 1 example completed; refresh
-    must surface the partial flag + sample-level bounds."""
+    """planned=3 from old metrics, only 1 completed in jsonl -> partial=True
+    + sample-level bounds."""
     run_dir = tmp_path / "sgl_eval_aime24_20260502-120000"
     run_dir.mkdir()
     (run_dir / "metrics.json").write_text(
@@ -136,8 +129,8 @@ def test_refresh_partial_emits_score_bounds(tmp_path: Path) -> None:
 
 
 def test_refresh_complete_run_clears_stale_partial_flag(tmp_path: Path) -> None:
-    """If the old metrics was ``partial=True`` but the predictions now
-    cover the full plan, refresh must drop the partial fields."""
+    """Old ``partial=True`` but jsonl now covers full plan -> partial fields
+    must drop, not linger as stale."""
     run_dir = tmp_path / "sgl_eval_aime24_20260502-120000"
     run_dir.mkdir()
     (run_dir / "metrics.json").write_text(
@@ -173,7 +166,6 @@ def test_refresh_complete_run_clears_stale_partial_flag(tmp_path: Path) -> None:
 
 
 def test_refresh_errors_on_no_jsonl(tmp_path: Path) -> None:
-    """Empty run_dir (no jsonl) -> exit with a clear error."""
     run_dir = tmp_path / "sgl_eval_aime24_20260502-120000"
     run_dir.mkdir()
     with pytest.raises(SystemExit, match="no output-rs"):
@@ -181,7 +173,6 @@ def test_refresh_errors_on_no_jsonl(tmp_path: Path) -> None:
 
 
 def test_refresh_errors_on_unparseable_dirname_without_metrics(tmp_path: Path) -> None:
-    """No metrics.json AND non-conforming dir name -> we can't infer benchmark."""
     run_dir = tmp_path / "random_dir_name"
     run_dir.mkdir()
     _write_jsonl(run_dir / "output-rs0.jsonl", [_row("x-0", True)])

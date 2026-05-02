@@ -1,12 +1,8 @@
 """``sgl-eval refresh <run_dir>``: rebuild ``metrics.json`` locally from
-existing ``output-rs*.jsonl``. Pure local computation -- no requests.
-
-Refreshes only what's derivable from predictions (aggregate, token tally,
-partial counts, score bounds). Provenance fields (``model``, ``base_url``,
-``latency_seconds``, ``total_prompt_tokens``, ``ns_commit_sha``, ...) are
-preserved verbatim from the existing ``metrics.json``; if it's absent,
-those fields are simply omitted (built from scratch best-effort).
-"""
+existing ``output-rs*.jsonl``. Recomputes derivable fields (aggregate,
+token tally, partial counts, score bounds); preserves provenance
+(``model`` / ``base_url`` / ``latency_seconds`` / ``total_prompt_tokens``
+/ ``ns_commit_sha`` / ``preset`` ...). No requests."""
 
 from __future__ import annotations
 
@@ -23,8 +19,8 @@ from sgl_eval.predictions import PredictionsReader
 from sgl_eval.registry import get
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
-# Fields ``RunResult`` -> ``dump_run`` populate from the result itself; must
-# not appear in ``run_meta`` (would raise the overlap guard).
+# dump_run sets these from ``RunResult``; must not appear in run_meta
+# (overlap guard would raise).
 _CORE_FIELDS = frozenset(
     {
         "name",
@@ -38,8 +34,8 @@ _CORE_FIELDS = frozenset(
     }
 )
 
-# Partial-related fields refresh recomputes; old values must be cleared so
-# we don't leave stale "partial=True" / bounds when the run is now complete.
+# Cleared before re-emit so a run that's now complete loses stale
+# ``partial=True`` / bounds from the previous (partial) metrics.json.
 _REFRESH_FIELDS = frozenset(
     {
         "partial",
@@ -139,10 +135,9 @@ def _resolve_name_and_n_repeats(
 def _resolve_planned_examples(
     old_payload: Optional[Dict[str, Any]], per_example: List[ExampleResult]
 ) -> int:
-    """Best-effort planned-example count: prefer the old metrics' value
-    (the live run knew the dataset slice). Fall back to len(per_example)
-    -- which forces ``partial=False`` since we have no signal of missing
-    examples in a from-scratch refresh."""
+    """Prefer old metrics (the live run knew the dataset slice). Fallback
+    to len(per_example) forces ``partial=False`` -- from-scratch refresh
+    has no signal of dropped examples."""
     if old_payload:
         for k in ("planned_examples", "num_examples"):
             if k in old_payload:
@@ -189,9 +184,7 @@ def _build_per_example(reader: PredictionsReader) -> List[ExampleResult]:
     ]
 
 
-def _aggregate(
-    category: str, per_example: List[ExampleResult], n_repeats: int
-) -> Dict[str, float]:
+def _aggregate(category: str, per_example: List[ExampleResult], n_repeats: int) -> Dict[str, float]:
     if n_repeats > 1:
         if category == "math":
             from sgl_eval.evals._math import aggregate_with_math_metrics
