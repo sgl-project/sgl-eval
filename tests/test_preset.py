@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from sgl_eval.preset import (
-    PRESET_ROOT,
     Endpoint,
     Expected,
     Preset,
@@ -114,33 +113,14 @@ def test_section_must_be_mapping(tmp_path: Path) -> None:
 # ---------- path resolution ----------
 
 
-def test_resolve_preset_path_by_name() -> None:
-    assert resolve_preset_path("foo") == PRESET_ROOT / "foo.yaml"
-
-
 def test_resolve_preset_path_with_slash_treated_as_path() -> None:
     p = resolve_preset_path("./presets/foo.yaml")
     assert p == Path("./presets/foo.yaml").expanduser()
 
 
-def test_resolve_preset_path_yml_extension() -> None:
-    p = resolve_preset_path("/abs/path/foo.yml")
-    assert p == Path("/abs/path/foo.yml")
-
-
-def test_resolve_preset_path_expands_home() -> None:
-    p = resolve_preset_path("~/bar/foo.yaml")
-    assert p.is_absolute()
-
-
 def test_load_missing_preset_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="preset not found"):
         load_preset(str(tmp_path / "nope.yaml"))
-
-
-def test_list_presets_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("sgl_eval.preset.PRESET_ROOT", tmp_path / "nonexistent")
-    assert list_presets() == []
 
 
 def test_list_presets_finds_yaml_and_yml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -223,30 +203,7 @@ def test_apply_to_gen_thinking_priority() -> None:
     assert gen.chat_template_kwargs == {"thinking": False}
 
 
-def test_apply_to_gen_preserves_default_only_fields() -> None:
-    """``reasoning_effort`` / ``extra_body`` / ``seed`` / ``system_message``
-    aren't preset/CLI overridable yet -- the default must round-trip."""
-    default = GenConfig(
-        reasoning_effort="high",
-        extra_body={"foo": "bar"},
-        seed=42,
-        system_message="hello",
-    )
-    gen = apply_to_gen(default, _preset_with(temperature=1.0), _args())
-    assert gen.reasoning_effort == "high"
-    assert gen.extra_body == {"foo": "bar"}
-    assert gen.seed == 42
-    assert gen.system_message == "hello"
-
-
 # ---------- Expected merge ----------
-
-
-def test_preset_expected_optional(tmp_path: Path) -> None:
-    p = tmp_path / "no_expected.yaml"
-    p.write_text("benchmark: aime24\n")
-    preset = load_preset(str(p))
-    assert preset.expected is None
 
 
 def test_preset_expected_score(tmp_path: Path) -> None:

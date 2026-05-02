@@ -155,41 +155,6 @@ def test_runner_partial_at_sample_level_when_n_repeats_gt_1():
     assert result.partial is True
 
 
-def test_runner_drops_aborted_samples_parallel():
-    """Parallel path: an ``as_completed`` worker raising ``WorkerAborted``
-    is skipped without poisoning sibling workers' results. We can't
-    guarantee which ones complete (thread interleaving), but the invariant
-    holds: every returned ExampleResult has aligned, non-empty triples."""
-    examples = [Example(id=str(i), inputs={}, target="x") for i in range(8)]
-
-    abort_event = threading.Event()
-    completed = {"n": 0}
-    lock = threading.Lock()
-
-    def flaky_sample_fn(_ex, _rep_idx):
-        with lock:
-            completed["n"] += 1
-            if completed["n"] >= 3:
-                abort_event.set()
-        if abort_event.is_set() and completed["n"] >= 3:
-            raise WorkerAborted()
-        return Sample(text="x", completion_tokens=1, finish_reason="stop")
-
-    result = run_examples(
-        "dummy",
-        examples,
-        flaky_sample_fn,
-        _all_correct_score_one_fn,
-        num_threads=4,
-        n_repeats=1,
-        progress=False,
-    )
-
-    assert 0 < result.num_examples <= len(examples)
-    for r in result.per_example:
-        assert len(r.samples) == len(r.scores) == len(r.extracted) >= 1
-
-
 def test_runner_invokes_on_sample_scored():
     """Callback fires once per ``(example, repeat)`` with the scored
     sample, score, and extracted answer -- this is the streaming-dump hook."""

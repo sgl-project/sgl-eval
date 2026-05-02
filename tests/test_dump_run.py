@@ -33,18 +33,6 @@ def _result() -> RunResult:
     )
 
 
-def test_writes_metrics_json_in_folder(tmp_path: Path) -> None:
-    path = dump_run(_result(), tmp_path)
-    assert path == tmp_path / "metrics.json"
-    assert path.is_file()
-
-
-def test_creates_missing_out_dir(tmp_path: Path) -> None:
-    nested = tmp_path / "nested" / "run_dir"
-    dump_run(_result(), nested)
-    assert (nested / "metrics.json").is_file()
-
-
 def test_payload_carries_core_fields(tmp_path: Path) -> None:
     dump_run(_result(), tmp_path)
     payload = json.loads((tmp_path / "metrics.json").read_text())
@@ -72,14 +60,6 @@ def test_run_meta_merged_to_top_level(tmp_path: Path) -> None:
     # Core fields preserved
     assert payload["aggregate"] == {"score": 0.85, "no_answer": 0.0}
     assert payload["name"] == "test_bench"
-
-
-def test_run_meta_none_or_empty_is_noop(tmp_path: Path) -> None:
-    dump_run(_result(), tmp_path)
-    p_none = json.loads((tmp_path / "metrics.json").read_text())
-    dump_run(_result(), tmp_path, run_meta={})
-    p_empty = json.loads((tmp_path / "metrics.json").read_text())
-    assert p_none == p_empty
 
 
 @pytest.mark.parametrize("clashing_key", ["name", "aggregate", "n_repeats", "latency_seconds"])

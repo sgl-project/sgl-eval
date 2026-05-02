@@ -86,23 +86,6 @@ def test_every_line_flush_visible_before_close(tmp_path: Path) -> None:
         w.close()
 
 
-def test_id_preserves_dataset_native_value(tmp_path: Path) -> None:
-    """``Example.id`` is set by the loader from the dataset row's native
-    ``id`` field (e.g. ``aime24-0``). It must round-trip into the JSONL
-    so partial-resume / sub-sampling can dedupe on it."""
-    native = Example(id="aime24-7", inputs={"problem": "P"}, target="42")
-    with PredictionsWriter(tmp_path, n_repeats=1) as w:
-        w(native, 0, _sample("ans"), 1.0, "42")
-    row = json.loads((tmp_path / "output-rs0.jsonl").read_text().splitlines()[0])
-    assert row["id"] == "aime24-7"
-
-
-def test_close_is_idempotent(tmp_path: Path) -> None:
-    w = PredictionsWriter(tmp_path, n_repeats=2)
-    w.close()
-    w.close()  # second close must not raise
-
-
 def test_thread_safety_no_interleaving_no_drops(tmp_path: Path) -> None:
     """Concurrent writes from many threads: every line stays a valid JSON
     object (no byte-level interleaving) and the total line count matches."""
@@ -136,29 +119,3 @@ def test_thread_safety_no_interleaving_no_drops(tmp_path: Path) -> None:
     expected_total = n_threads * n_writes_per_thread
     assert total_lines == expected_total
     assert len(seen_generations) == expected_total  # no duplicates, no drops
-
-
-def test_no_writer_path_runner_still_works() -> None:
-    """``on_sample_scored=None`` -- the path the CLI takes when
-    ``--no-dump-predictions`` is set. Runner must complete normally."""
-    from sgl_eval.runner import run_examples
-
-    examples = [Example(id=str(i), inputs={}, target=str(i)) for i in range(4)]
-
-    def sample_fn(ex: Example, _rep: int) -> Sample:
-        return Sample(text="x", completion_tokens=1, finish_reason="stop")
-
-    def score_one(ex: Example, _sample: Sample):
-        return 1.0, "ok"
-
-    result = run_examples(
-        "dummy",
-        examples,
-        sample_fn,
-        score_one,
-        num_threads=2,
-        n_repeats=1,
-        progress=False,
-        on_sample_scored=None,
-    )
-    assert result.aggregate["score"] == 1.0

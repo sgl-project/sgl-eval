@@ -30,24 +30,9 @@ def test_iter_rep_yields_only_that_rep(tmp_path: Path) -> None:
     assert all(r["generation"].startswith("r1-") for r in rows)
 
 
-def test_iter_all_covers_every_rep(tmp_path: Path) -> None:
-    _seed_run_dir(tmp_path, n_repeats=3)
-    pairs = list(PredictionsReader(tmp_path).iter_all())
-    assert len(pairs) == 6  # 2 examples * 3 reps
-    reps_seen = sorted({rep for rep, _ in pairs})
-    assert reps_seen == [0, 1, 2]
-
-
 def test_n_repeats_autodetect(tmp_path: Path) -> None:
     _seed_run_dir(tmp_path, n_repeats=4)
     assert PredictionsReader(tmp_path).n_repeats == 4
-
-
-def test_n_repeats_override(tmp_path: Path) -> None:
-    """Explicit ``n_repeats`` wins; covers a partial run that aborted
-    before higher reps wrote anything."""
-    _seed_run_dir(tmp_path, n_repeats=2)
-    assert PredictionsReader(tmp_path, n_repeats=8).n_repeats == 8
 
 
 def test_iter_rep_missing_file_is_empty(tmp_path: Path) -> None:

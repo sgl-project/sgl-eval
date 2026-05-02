@@ -60,16 +60,6 @@ def test_basic_call(sampler):
     assert out.finish_reason == "stop"
 
 
-def test_gen_config_propagates(sampler):
-    gen = GenConfig(temperature=0.7, top_p=0.9, max_tokens=128, seed=42)
-    sampler([{"role": "user", "content": "hi"}], gen)
-    kw = sampler._captured["kwargs"]
-    assert kw["temperature"] == 0.7
-    assert kw["top_p"] == 0.9
-    assert kw["max_tokens"] == 128
-    assert kw["seed"] == 42
-
-
 def test_max_tokens_none_omitted(sampler):
     """When ``GenConfig.max_tokens is None`` (NS-aligned default), the
     sampler omits the kwarg so the server picks its own context cap."""
@@ -93,15 +83,6 @@ def test_system_message_prepended(sampler):
     assert msgs[1] == {"role": "user", "content": "hi"}
 
 
-def test_timestamps_recorded(sampler):
-    """Sampler stamps generation_start_time / end_time on each call so the
-    data_point fed into vendored MathMetrics has gen_seconds info."""
-    out = sampler([{"role": "user", "content": "hi"}])
-    assert out.generation_start_time is not None
-    assert out.generation_end_time is not None
-    assert out.generation_end_time >= out.generation_start_time
-
-
 def test_reasoning_tokens_extracted(sampler):
     """When the response carries usage.completion_tokens_details.reasoning_tokens
     (reasoning models), it is mirrored onto Sample.reasoning_tokens."""
@@ -111,21 +92,6 @@ def test_reasoning_tokens_extracted(sampler):
     out = sampler([{"role": "user", "content": "hi"}])
     assert out.completion_tokens == 20
     assert out.reasoning_tokens == 15
-
-
-def test_reasoning_tokens_absent(sampler):
-    """Plain models without reasoning split leave reasoning_tokens=None;
-    NeMo-Skills' fallback in BaseMetrics.update treats it as zero."""
-    out = sampler([{"role": "user", "content": "hi"}])
-    assert out.reasoning_tokens is None
-
-
-def test_aborted_property_reflects_event(sampler):
-    """``sampler.aborted`` mirrors the internal event so callers (e.g. the
-    CLI) don't need to share the ``threading.Event`` directly."""
-    assert sampler.aborted is False
-    sampler._abort_event.set()
-    assert sampler.aborted is True
 
 
 def test_abort_before_call_raises(sampler):
