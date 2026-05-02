@@ -30,4 +30,4 @@ sgl_eval/_vendored/nemo_skills/dataset/gpqa/*.jsonl
 # machine -- rdev's .rsyncignore doesn't read .gitignore, so the yamls do
 # travel even though git ignores them. Real cluster paths / endpoints
 # inside, so never committed. Load via ``--preset preset_config/<name>.yaml``.
-/preset_config
+/preset_config/
