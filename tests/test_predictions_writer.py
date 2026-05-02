@@ -13,7 +13,7 @@ import json
 import threading
 from pathlib import Path
 
-from sgl_eval.evals._predictions import PredictionsWriter
+from sgl_eval.predictions import PredictionsWriter
 from sgl_eval.types import Example, Sample
 
 

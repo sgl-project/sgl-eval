@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sgl_eval._vendored.nemo_skills.evaluator.math import MathEvaluator
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
-from sgl_eval.evals._predictions import PredictionsWriter, sample_to_pred
+from sgl_eval.predictions import PredictionsWriter, sample_to_pred
 from sgl_eval.evals._prompts import render_prompt, vendored_prompt
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples
 from sgl_eval.sampler import ChatCompletionSampler

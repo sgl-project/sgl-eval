@@ -22,7 +22,7 @@ import yaml
 
 from sgl_eval import VENDORED_NS_ROOT
 from sgl_eval import __version__ as _SGL_EVAL_VERSION
-from sgl_eval.evals._predictions import PredictionsWriter
+from sgl_eval.predictions import PredictionsWriter
 from sgl_eval.metrics import dump_run, format_summary
 from sgl_eval.preset import (
     add_preset_run_flag,
