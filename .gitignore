@@ -24,3 +24,10 @@ sgl_eval/_vendored/nemo_skills/dataset/gsm8k/original_*.jsonl
 sgl_eval/_vendored/nemo_skills/dataset/mmlu/test.jsonl
 sgl_eval/_vendored/nemo_skills/dataset/mmlu/data.tar
 sgl_eval/_vendored/nemo_skills/dataset/gpqa/*.jsonl
+
+# Local preset configs. ``preset_config/`` is a real folder of preset yamls
+# staged in the repo so rdev sync / lsync ferries them to the remote
+# machine -- rdev's .rsyncignore doesn't read .gitignore, so the yamls do
+# travel even though git ignores them. Real cluster paths / endpoints
+# inside, so never committed. Load via ``--preset preset_config/<name>.yaml``.
+/preset_config
