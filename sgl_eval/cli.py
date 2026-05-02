@@ -182,9 +182,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     if result.partial:
         completed_samples = sum(len(r.samples) for r in result.per_example)
+        planned_samples = result.planned_examples * result.n_repeats
+        n_correct = sum(score for r in result.per_example for score in r.scores)
+        worst, best = _score_bounds(n_correct, completed_samples, planned_samples)
         run_meta["partial"] = True
         run_meta["planned_examples"] = result.planned_examples
         run_meta["completed_samples"] = completed_samples
+        # Sample-level accuracy bounds: missing samples treated as all-wrong
+        # (worst) or all-correct (best). Metric-agnostic and tight; tells the
+        # user how much the partial run is worth.
+        run_meta["score_lower_bound"] = worst
+        run_meta["score_upper_bound"] = best
     preset_block = make_run_meta_block(args, inputs.preset)
     if preset_block:
         run_meta["preset"] = preset_block
@@ -202,22 +210,51 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 130 if sampler.aborted else 0
 
 
+def _score_bounds(
+    n_correct: float, completed_samples: int, planned_samples: int
+) -> tuple[float, float]:
+    """Sample-level accuracy bounds for a partial run.
+
+    Lower bound: missing samples are all wrong. Upper bound: missing
+    samples are all correct. Metric-agnostic -- whatever the aggregator
+    does, accuracy must fall in [worst, best]. Returns (worst, best) in
+    [0.0, 1.0].
+    """
+    if planned_samples <= 0:
+        return 0.0, 0.0
+    n_missing = planned_samples - completed_samples
+    return n_correct / planned_samples, (n_correct + n_missing) / planned_samples
+
+
 def _format_partial_summary(result: Any) -> str:
-    """``[partial]`` footer surfacing how much got done. Uses sample-level
-    counts when ``n_repeats > 1`` (per-example pad-with-last makes pure
-    example counts misleading there); example-level otherwise (equivalent)."""
+    """``[partial]`` footer: how much got done + worst/best score bounds.
+
+    Progress line uses sample-level counts when ``n_repeats > 1`` (per-
+    example pad-with-last makes pure example counts misleading there);
+    example-level otherwise (equivalent). Score bounds are always sample-
+    level so they're comparable across n_repeats settings.
+    """
     completed_samples = sum(len(r.samples) for r in result.per_example)
     planned_samples = result.planned_examples * result.n_repeats
     unfinished = planned_samples - completed_samples
-    skipped = "expected_vs_actual skipped (partial runs aren't comparable to baselines)."
+    n_correct = sum(score for r in result.per_example for score in r.scores)
+    worst, best = _score_bounds(n_correct, completed_samples, planned_samples)
     if result.n_repeats > 1:
-        return (
-            f"\n[partial] {completed_samples} / {planned_samples} samples completed "
-            f"({unfinished} unfinished, n_repeats={result.n_repeats}); {skipped}"
+        progress = (
+            f"{completed_samples} / {planned_samples} samples completed "
+            f"({unfinished} unfinished, n_repeats={result.n_repeats})"
+        )
+    else:
+        progress = (
+            f"{len(result.per_example)} / {result.planned_examples} "
+            f"examples completed ({unfinished} unfinished)"
         )
     return (
-        f"\n[partial] {len(result.per_example)} / {result.planned_examples} "
-        f"examples completed ({unfinished} unfinished); {skipped}"
+        f"\n[partial] {progress}\n"
+        f"[partial] score range: [{worst:.2%}, {best:.2%}] "
+        "(missing samples assumed all-wrong / all-correct)\n"
+        "[partial] expected_vs_actual skipped (partial runs aren't "
+        "comparable to baselines)."
     )
 
 
