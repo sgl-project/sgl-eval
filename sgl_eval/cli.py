@@ -181,8 +181,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         args=args, sampler=sampler, gen=inputs.gen, stamp=stamp, base_url=inputs.base_url
     )
     if result.partial:
+        completed_samples = sum(len(r.samples) for r in result.per_example)
         run_meta["partial"] = True
-        run_meta["completed_examples"] = len(result.per_example)
+        run_meta["planned_examples"] = result.planned_examples
+        run_meta["completed_samples"] = completed_samples
     preset_block = make_run_meta_block(args, inputs.preset)
     if preset_block:
         run_meta["preset"] = preset_block
@@ -191,17 +193,32 @@ def cmd_run(args: argparse.Namespace) -> int:
     if writer is not None:
         print(f"Predictions: {run_dir}  ({inputs.n_repeats} jsonl file(s))")
     if result.partial:
-        print(
-            f"\n[partial] aborted after {len(result.per_example)} example(s); "
-            "expected_vs_actual skipped (partial runs aren't comparable to baselines).",
-            file=sys.stderr,
-        )
+        print(_format_partial_summary(result), file=sys.stderr)
     else:
         print_expected_vs_actual(result, inputs.preset)
     # Exit code 130 if the user pressed Ctrl-C, even when every example
     # happened to finish before the abort propagated -- their intent was
     # to bail, so respect it.
     return 130 if sampler.aborted else 0
+
+
+def _format_partial_summary(result: Any) -> str:
+    """``[partial]`` footer surfacing how much got done. Uses sample-level
+    counts when ``n_repeats > 1`` (per-example pad-with-last makes pure
+    example counts misleading there); example-level otherwise (equivalent)."""
+    completed_samples = sum(len(r.samples) for r in result.per_example)
+    planned_samples = result.planned_examples * result.n_repeats
+    unfinished = planned_samples - completed_samples
+    skipped = "expected_vs_actual skipped (partial runs aren't comparable to baselines)."
+    if result.n_repeats > 1:
+        return (
+            f"\n[partial] {completed_samples} / {planned_samples} samples completed "
+            f"({unfinished} unfinished, n_repeats={result.n_repeats}); {skipped}"
+        )
+    return (
+        f"\n[partial] {len(result.per_example)} / {result.planned_examples} "
+        f"examples completed ({unfinished} unfinished); {skipped}"
+    )
 
 
 def _make_sigint_handler(sampler: ChatCompletionSampler) -> Any:

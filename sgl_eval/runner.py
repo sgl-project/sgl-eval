@@ -112,6 +112,8 @@ def run_examples(
 
     aggregate = aggregate_fn(results) if aggregate_fn else _default_aggregate(results)
 
+    planned_samples = len(examples) * n_repeats
+    completed_samples = sum(len(r.samples) for r in results)
     return RunResult(
         name=name,
         per_example=results,
@@ -121,7 +123,8 @@ def run_examples(
         n_repeats=n_repeats,
         total_completion_tokens=total_completion,
         total_prompt_tokens=total_prompt,
-        partial=len(results) < len(examples),
+        partial=completed_samples < planned_samples,
+        planned_examples=len(examples),
     )
 
 

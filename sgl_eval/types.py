@@ -71,10 +71,16 @@ class ExampleResult:
 class RunResult:
     """Top-level eval result. Aggregator metrics live in ``aggregate``.
 
-    ``partial`` is True when one or more examples were dropped because no
-    repeat completed (e.g. the runner was aborted mid-flight). Downstream
-    consumers (metrics writer, baseline comparator) should treat partial
-    results as not directly comparable to full runs.
+    ``partial`` is True when at least one ``(example, repeat)`` sample
+    didn't make it into ``per_example`` (e.g. the runner was aborted
+    mid-flight). Defined at the sample level so an example whose 1/3 reps
+    completed -- which the aggregator pads up to 3 by repeating the last
+    sample -- still surfaces as partial.
+
+    ``planned_examples`` is what the runner was asked to score; multiply
+    by ``n_repeats`` for planned samples. ``num_examples`` is what
+    survived (>=1 rep completed); ``sum(len(r.samples) for r in per_example)``
+    gives completed samples.
     """
 
     name: str
@@ -86,6 +92,7 @@ class RunResult:
     total_completion_tokens: int = 0
     total_prompt_tokens: int = 0
     partial: bool = False
+    planned_examples: int = 0
 
     @property
     def output_throughput(self) -> float:

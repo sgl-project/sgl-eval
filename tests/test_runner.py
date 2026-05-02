@@ -39,6 +39,7 @@ def test_runner_basic():
     )
     assert result.num_examples == 4
     assert result.partial is False
+    assert result.planned_examples == 4
     assert result.aggregate["score"] == 1.0
     assert result.total_completion_tokens == 4 * 5
     assert result.output_throughput > 0
@@ -111,10 +112,47 @@ def test_runner_drops_aborted_samples_serial():
 
     assert result.num_examples == 2
     assert result.partial is True
+    assert result.planned_examples == 4
     for r in result.per_example:
         assert len(r.samples) == len(r.scores) == len(r.extracted) == 1
         assert r.samples[0].text == "x"
     assert result.aggregate["score"] == 1.0
+
+
+def test_runner_partial_at_sample_level_when_n_repeats_gt_1():
+    """An example that completed only some of its reps is partial too --
+    even though it survives in ``per_example``, the missing reps mean
+    the aggregator's pad-with-last would silently fabricate data, so
+    ``partial`` must surface."""
+    examples = [Example(id=str(i), inputs={}, target="x") for i in range(2)]
+    counter = {"n": 0}
+
+    def flaky_sample_fn(_ex, _rep_idx):
+        counter["n"] += 1
+        # Serial order is (ex0,0), (ex0,1), (ex0,2), (ex1,0), ...
+        # Abort after 2 calls -> ex0 keeps 2/3 reps, ex1 gets nothing.
+        if counter["n"] > 2:
+            raise WorkerAborted()
+        return Sample(text="x", completion_tokens=1, finish_reason="stop")
+
+    result = run_examples(
+        "dummy",
+        examples,
+        flaky_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=1,
+        n_repeats=3,
+        progress=False,
+    )
+
+    completed = sum(len(r.samples) for r in result.per_example)
+    assert result.planned_examples == 2
+    assert result.num_examples == 1  # ex1 dropped (zero reps)
+    assert completed == 2  # ex0 kept 2/3 reps
+    # 2 < 6 planned -> partial fires. Critically, ex0 lives in
+    # per_example with only 2 samples; without sample-level partial
+    # this case would slip through as "complete".
+    assert result.partial is True
 
 
 def test_runner_drops_aborted_samples_parallel():
