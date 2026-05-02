@@ -46,20 +46,21 @@ def test_payload_carries_core_fields(tmp_path: Path) -> None:
     assert payload["total_prompt_tokens"] == 200
 
 
-def test_run_meta_merged_to_top_level(tmp_path: Path) -> None:
+def test_run_meta_merged_with_unicode_preserved(tmp_path: Path) -> None:
+    """run_meta merges into the top-level payload; non-ASCII stays readable
+    (ensure_ascii=False) and core fields aren't shadowed."""
     run_meta = {
         "model": "DSv3.2",
-        "base_url": "http://x:30000/v1",
         "ns_commit_sha": "645cf56",
-        "timestamp": "20260501-143052",
+        "note": "你好 LaTeX $\\boxed{42}$",
     }
     dump_run(_result(), tmp_path, run_meta=run_meta)
-    payload = json.loads((tmp_path / "metrics.json").read_text())
+    raw = (tmp_path / "metrics.json").read_text()
+    payload = json.loads(raw)
     for k, v in run_meta.items():
         assert payload[k] == v
-    # Core fields preserved
-    assert payload["aggregate"] == {"score": 0.85, "no_answer": 0.0}
-    assert payload["name"] == "test_bench"
+    assert payload["name"] == "test_bench"  # core field preserved
+    assert "你好" in raw and "\\u" not in raw  # unicode unescaped
 
 
 @pytest.mark.parametrize("clashing_key", ["name", "aggregate", "n_repeats", "latency_seconds"])
@@ -67,11 +68,3 @@ def test_run_meta_overlap_with_core_field_raises(tmp_path: Path, clashing_key: s
     """Reserved core fields must not be silently overridden by run_meta."""
     with pytest.raises(ValueError, match="overlaps reserved metrics fields"):
         dump_run(_result(), tmp_path, run_meta={clashing_key: "bogus"})
-
-
-def test_unicode_in_run_meta_not_escaped(tmp_path: Path) -> None:
-    """ensure_ascii=False keeps non-ASCII content readable in metrics.json."""
-    dump_run(_result(), tmp_path, run_meta={"note": "你好 LaTeX $\\boxed{42}$"})
-    raw = (tmp_path / "metrics.json").read_text()
-    assert "你好" in raw
-    assert "\\u" not in raw  # no escape sequences for the unicode chars

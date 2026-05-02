@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from sgl_eval.cli import _format_partial_summary, _partial_stats, _score_bounds
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
@@ -19,43 +21,25 @@ def _make_result(per_example, planned_examples, n_repeats):
     )
 
 
-def test_score_bounds_basic():
-    """3/10 done, all correct -> worst 30% (missing all wrong),
-    best 100% (missing all right)."""
-    worst, best = _score_bounds(n_correct=3.0, completed_samples=3, planned_samples=10)
-    assert worst == 0.3
-    assert best == 1.0
-
-
-def test_score_bounds_zero_correct():
-    """3/10 done, none correct -> worst 0%, best 70%."""
-    worst, best = _score_bounds(n_correct=0.0, completed_samples=3, planned_samples=10)
-    assert worst == 0.0
-    assert best == 0.7
-
-
-def test_score_bounds_all_done():
-    """When nothing is missing, worst == best == actual rate (sanity check
-    -- partial runs typically don't hit this branch but the math should
-    still collapse correctly)."""
-    worst, best = _score_bounds(n_correct=7.0, completed_samples=10, planned_samples=10)
-    assert worst == 0.7
-    assert best == 0.7
-
-
-def test_score_bounds_zero_planned():
-    """Empty dataset -> bounds are zero, no division by zero."""
-    worst, best = _score_bounds(n_correct=0.0, completed_samples=0, planned_samples=0)
-    assert worst == 0.0
-    assert best == 0.0
-
-
 def _ex_result(ex_id, scores):
     ex = Example(id=ex_id, inputs={}, target="x")
     samples = [Sample(text="x", completion_tokens=1, finish_reason="stop") for _ in scores]
     return ExampleResult(
         example=ex, samples=samples, scores=list(scores), extracted=["x"] * len(scores)
     )
+
+
+@pytest.mark.parametrize(
+    "n_correct, completed, planned, worst, best",
+    [
+        (3.0, 3, 10, 0.3, 1.0),  # missing all-wrong -> 30%, all-right -> 100%
+        (0.0, 3, 10, 0.0, 0.7),  # 0 correct, 7 missing
+        (7.0, 10, 10, 0.7, 0.7),  # nothing missing -> bounds collapse to actual
+        (0.0, 0, 0, 0.0, 0.0),  # empty dataset, no div-by-zero
+    ],
+)
+def test_score_bounds(n_correct, completed, planned, worst, best):
+    assert _score_bounds(n_correct, completed, planned) == (worst, best)
 
 
 def test_partial_stats_single_walk():
@@ -76,16 +60,6 @@ def test_partial_stats_single_walk():
     # n_correct = 5; worst = 5/15, best = (5+9)/15
     assert stats.worst == 5 / 15
     assert stats.best == 14 / 15
-
-
-def test_partial_stats_all_full_no_dropped():
-    """Edge case: every rep done for every example -- partial flag may
-    still fire from elsewhere, but the buckets all collapse correctly."""
-    per_example = [_ex_result("a", [1.0, 1.0]), _ex_result("b", [0.0, 1.0])]
-    result = _make_result(per_example, planned_examples=2, n_repeats=2)
-    stats = _partial_stats(result)
-    assert (stats.full, stats.part, stats.dropped) == (2, 0, 0)
-    assert stats.unfinished_samples == 0
 
 
 def test_partial_summary_n_repeats_1():

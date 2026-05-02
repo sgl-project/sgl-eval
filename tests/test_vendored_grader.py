@@ -1,31 +1,13 @@
-"""Smoke tests for the vendored math chain. We verify the surface we
-actually call from benchmark code: ``extract_answer``, ``math_equal``,
-``MathMetrics``. We do **not** vendor upstream's full test suite by design
-(per ROADMAP "Dependency policy" — drift detection comes from upstream
-dep mirroring, not from a parallel test set).
+"""Smoke tests for the vendored math chain. ``math_equal`` / ``extract_answer``
+are exhaustively covered by the vendored NS slice's own ``test_math_equal``;
+we keep only what's NOT covered there: our ``relaxed`` flag config and the
+``MathMetrics`` integration we actually call into.
 """
 
 from __future__ import annotations
 
-import pytest
-
 from sgl_eval._vendored.nemo_skills.math_grader import extract_answer, math_equal
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
-
-
-@pytest.mark.parametrize(
-    "gt,pred,expected",
-    [
-        ("70", "70", True),
-        ("70", "070", True),
-        ("1/2", 0.5, True),
-        ("\\frac{1}{2}", 0.5, True),
-        ("70", "69", False),
-        (0, None, False),
-    ],
-)
-def test_math_equal_basics(gt, pred, expected):
-    assert math_equal(gt, pred) is expected
 
 
 def test_math_equal_take_modulo_param():
@@ -33,18 +15,6 @@ def test_math_equal_take_modulo_param():
     not currently pass it (upstream's aime configs don't either), but the
     parameter exists and we exercise it as a unit test."""
     assert math_equal("42", "1042", take_modulo=1000)
-
-
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("Answer is \\boxed{42}", "42"),
-        ("\\boxed{x^2}", "x^2"),
-        ("nothing here", None),
-    ],
-)
-def test_extract_answer_boxed(text, expected):
-    assert extract_answer(text) == expected
 
 
 def test_extract_answer_relaxed_falls_back():

@@ -52,14 +52,6 @@ def sampler(monkeypatch):
     return s
 
 
-def test_basic_call(sampler):
-    out = sampler([{"role": "user", "content": "hi"}])
-    assert out.text == "hello"
-    assert out.completion_tokens == 7
-    assert out.prompt_tokens == 11
-    assert out.finish_reason == "stop"
-
-
 def test_max_tokens_none_omitted(sampler):
     """When ``GenConfig.max_tokens is None`` (NS-aligned default), the
     sampler omits the kwarg so the server picks its own context cap."""

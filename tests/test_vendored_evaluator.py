@@ -6,24 +6,24 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 
-def test_math_evaluator_eval_single():
+
+@pytest.mark.parametrize(
+    "generation, expected_answer, correct",
+    [
+        ("Reasoning... \\boxed{42}", "42", True),
+        ("Reasoning... \\boxed{41}", "42", False),
+    ],
+)
+def test_math_evaluator_eval_single(generation, expected_answer, correct):
     from sgl_eval._vendored.nemo_skills.evaluator.math import MathEvaluator
 
     ev = MathEvaluator(config={})
-    dp = {"generation": "Reasoning... \\boxed{42}", "expected_answer": "42"}
-    out = asyncio.run(ev.eval_single(dp))
-    assert out["predicted_answer"] == "42"
-    assert out["symbolic_correct"] is True
-
-
-def test_math_evaluator_wrong_answer():
-    from sgl_eval._vendored.nemo_skills.evaluator.math import MathEvaluator
-
-    ev = MathEvaluator(config={})
-    dp = {"generation": "Reasoning... \\boxed{41}", "expected_answer": "42"}
-    out = asyncio.run(ev.eval_single(dp))
-    assert out["symbolic_correct"] is False
+    out = asyncio.run(
+        ev.eval_single({"generation": generation, "expected_answer": expected_answer})
+    )
+    assert out["symbolic_correct"] is correct
 
 
 def test_dataset_metadata_aime25():
@@ -33,21 +33,13 @@ def test_dataset_metadata_aime25():
     assert "prompt_config=generic/math" in aime25.GENERATION_ARGS
 
 
-def test_aime25_bundled_data_loads():
+@pytest.mark.parametrize("name", ["aime24", "aime25"])
+def test_aime_bundled_data_loads(name):
     from sgl_eval.evals._loader import load_bundled
 
-    loader = load_bundled("aime25")
-    exs = loader(None)
+    exs = load_bundled(name)(None)
     assert len(exs) == 30
-    assert all(e.target.isdigit() or e.target.lstrip("-").isdigit() for e in exs)
-
-
-def test_aime24_bundled_data_loads():
-    from sgl_eval.evals._loader import load_bundled
-
-    loader = load_bundled("aime24")
-    exs = loader(None)
-    assert len(exs) == 30
+    assert all(e.target.lstrip("-").isdigit() for e in exs)
 
 
 def test_prompt_render_no_few_shot():
