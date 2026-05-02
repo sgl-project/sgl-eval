@@ -69,7 +69,13 @@ class ExampleResult:
 
 @dataclass
 class RunResult:
-    """Top-level eval result. Aggregator metrics live in ``aggregate``."""
+    """Top-level eval result. Aggregator metrics live in ``aggregate``.
+
+    ``partial`` is True when one or more examples were dropped because no
+    repeat completed (e.g. the runner was aborted mid-flight). Downstream
+    consumers (metrics writer, baseline comparator) should treat partial
+    results as not directly comparable to full runs.
+    """
 
     name: str
     per_example: List[ExampleResult]
@@ -79,6 +85,7 @@ class RunResult:
     n_repeats: int
     total_completion_tokens: int = 0
     total_prompt_tokens: int = 0
+    partial: bool = False
 
     @property
     def output_throughput(self) -> float:

@@ -30,8 +30,17 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-from sgl_eval.sampler import SamplerAborted
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
+
+
+class WorkerAborted(Exception):
+    """Raised by ``sample_fn`` to tell the runner this ``(example, repeat)``
+    pair was abandoned mid-flight (e.g. CLI Ctrl-C closed the underlying
+    transport). The runner skips the pair, drops examples with no completed
+    repeats, and reports ``RunResult.partial = True``. Any sampler /
+    transport that wants to participate in cooperative cancellation should
+    raise this (or a subclass) from inside ``sample_fn``."""
+
 
 TickFn = Callable[[int, float], None]
 SampleFn = Callable[..., Sample]
@@ -112,6 +121,7 @@ def run_examples(
         n_repeats=n_repeats,
         total_completion_tokens=total_completion,
         total_prompt_tokens=total_prompt,
+        partial=len(results) < len(examples),
     )
 
 
@@ -132,7 +142,7 @@ def _run_sample_score_phase(
         for ex, rep in tasks:
             try:
                 sample = sample_fn(ex, rep)
-            except SamplerAborted:
+            except WorkerAborted:
                 return
             samples_by_ex[ex.id][rep] = sample
             score, extracted = score_one_fn(ex, sample)
@@ -149,10 +159,10 @@ def _run_sample_score_phase(
                 ex_id, rep = futures[fut]
                 try:
                     sample = fut.result()
-                except SamplerAborted:
-                    # In-flight request was killed by sampler.abort(); drop
-                    # this (ex, rep) pair. Other pending workers will short-
-                    # circuit on the same abort flag and end up here too.
+                except WorkerAborted:
+                    # Cooperative cancellation: sample_fn signaled this pair
+                    # was abandoned (e.g. CLI Ctrl-C closed the transport).
+                    # Sibling workers will end up here too.
                     continue
                 samples_by_ex[ex_id][rep] = sample
                 ex = ex_by_id[ex_id]
@@ -164,7 +174,7 @@ def _run_sample_score_phase(
                 tick(rep, score)
         finally:
             # Cancel any pending submissions; in-flight workers will surface
-            # SamplerAborted on their next abort_event check and finish fast.
+            # WorkerAborted on their next abort_event check and finish fast.
             pool.shutdown(wait=False, cancel_futures=True)
 
 

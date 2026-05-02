@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from sgl_eval.runner import WorkerAborted
 from sgl_eval.sampler import ChatCompletionSampler, SamplerAborted
 from sgl_eval.types import GenConfig
 
@@ -117,6 +118,20 @@ def test_reasoning_tokens_absent(sampler):
     NeMo-Skills' fallback in BaseMetrics.update treats it as zero."""
     out = sampler([{"role": "user", "content": "hi"}])
     assert out.reasoning_tokens is None
+
+
+def test_sampler_aborted_subclasses_worker_aborted():
+    """Runner only knows ``WorkerAborted``; sampler-side ``SamplerAborted``
+    must propagate through the runner's ``except WorkerAborted`` clause."""
+    assert issubclass(SamplerAborted, WorkerAborted)
+
+
+def test_aborted_property_reflects_event(sampler):
+    """``sampler.aborted`` mirrors the internal event so callers (e.g. the
+    CLI) don't need to share the ``threading.Event`` directly."""
+    assert sampler.aborted is False
+    sampler._abort_event.set()
+    assert sampler.aborted is True
 
 
 def test_abort_before_call_raises(sampler):

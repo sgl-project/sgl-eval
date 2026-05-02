@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import threading
 
-from sgl_eval.runner import run_examples
-from sgl_eval.sampler import SamplerAborted
+from sgl_eval.runner import WorkerAborted, run_examples
 from sgl_eval.types import Example, Sample
 
 
@@ -39,6 +38,7 @@ def test_runner_basic():
         progress=False,
     )
     assert result.num_examples == 4
+    assert result.partial is False
     assert result.aggregate["score"] == 1.0
     assert result.total_completion_tokens == 4 * 5
     assert result.output_throughput > 0
@@ -85,7 +85,7 @@ def test_runner_n_repeats_flat_concurrency():
 
 
 def test_runner_drops_aborted_samples_serial():
-    """When ``sample_fn`` raises ``SamplerAborted`` (i.e. CLI Ctrl-C closed
+    """When ``sample_fn`` raises ``WorkerAborted`` (i.e. CLI Ctrl-C closed
     the httpx client), the serial runner stops, drops examples with no
     completed repeats, and aligns samples / scores / extracted so partial
     aggregation works."""
@@ -96,7 +96,7 @@ def test_runner_drops_aborted_samples_serial():
     def flaky_sample_fn(ex, _rep_idx):
         counter["n"] += 1
         if counter["n"] > 2:
-            raise SamplerAborted()
+            raise WorkerAborted()
         return Sample(text="x", completion_tokens=1, finish_reason="stop")
 
     result = run_examples(
@@ -110,6 +110,7 @@ def test_runner_drops_aborted_samples_serial():
     )
 
     assert result.num_examples == 2
+    assert result.partial is True
     for r in result.per_example:
         assert len(r.samples) == len(r.scores) == len(r.extracted) == 1
         assert r.samples[0].text == "x"
@@ -117,7 +118,7 @@ def test_runner_drops_aborted_samples_serial():
 
 
 def test_runner_drops_aborted_samples_parallel():
-    """Parallel path: an ``as_completed`` worker raising ``SamplerAborted``
+    """Parallel path: an ``as_completed`` worker raising ``WorkerAborted``
     is skipped without poisoning sibling workers' results. We can't
     guarantee which ones complete (thread interleaving), but the invariant
     holds: every returned ExampleResult has aligned, non-empty triples."""
@@ -133,7 +134,7 @@ def test_runner_drops_aborted_samples_parallel():
             if completed["n"] >= 3:
                 abort_event.set()
         if abort_event.is_set() and completed["n"] >= 3:
-            raise SamplerAborted()
+            raise WorkerAborted()
         return Sample(text="x", completion_tokens=1, finish_reason="stop")
 
     result = run_examples(

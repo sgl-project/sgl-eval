@@ -17,18 +17,17 @@ import httpx
 import openai
 from openai import OpenAI
 
+from sgl_eval.runner import WorkerAborted
 from sgl_eval.types import GenConfig, MessageList, Sample
 
 LOG = logging.getLogger(__name__)
 
 
-class SamplerAborted(Exception):
-    """Raised when the sampler was aborted mid-flight via ``abort()``.
-
-    Bypasses the retry loop and propagates out of the worker so the runner
-    can drop the in-flight sample instead of recording it. Used by the CLI's
-    Ctrl-C handler to kill in-flight requests immediately.
-    """
+class SamplerAborted(WorkerAborted):
+    """Sampler-side specialization of ``WorkerAborted``: ``abort()`` was
+    called mid-flight. Bypasses the retry loop and propagates out of the
+    worker; the runner catches it as ``WorkerAborted`` without knowing the
+    sampler exists."""
 
 
 class _LargeHttpxClient(httpx.Client):
@@ -49,23 +48,31 @@ class ChatCompletionSampler:
         model: Optional[str] = None,
         api_key: str = "EMPTY",
         max_retries: int = 6,
-        abort_event: Optional[threading.Event] = None,
     ) -> None:
-        self.client = OpenAI(base_url=base_url, api_key=api_key, http_client=_LargeHttpxClient())
+        # Hold the httpx client directly so ``abort()`` can close it without
+        # reaching into ``OpenAI``'s private ``_client`` attribute.
+        self._http = _LargeHttpxClient()
+        self.client = OpenAI(base_url=base_url, api_key=api_key, http_client=self._http)
         self.model = model or self._resolve_default_model()
         self.max_retries = max_retries
-        self._abort_event = abort_event or threading.Event()
+        self._abort_event = threading.Event()
+
+    @property
+    def aborted(self) -> bool:
+        """True if ``abort()`` was called. CLI uses this to decide exit code
+        without needing to share a ``threading.Event`` directly."""
+        return self._abort_event.is_set()
 
     def abort(self) -> None:
         """Set the abort flag and close the underlying httpx client.
 
-        In-flight ``chat.completions.create(...)`` calls raise ``ConnectError``
-        / ``RemoteProtocolError`` immediately; the retry loop short-circuits
-        on the abort flag and re-raises ``SamplerAborted``. Idempotent.
+        In-flight ``chat.completions.create(...)`` calls raise immediately;
+        the retry loop short-circuits on the abort flag and re-raises
+        ``SamplerAborted``. Idempotent.
         """
         self._abort_event.set()
         try:
-            self.client._client.close()
+            self._http.close()
         except Exception:
             pass
 
