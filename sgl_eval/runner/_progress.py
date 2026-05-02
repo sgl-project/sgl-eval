@@ -1,10 +1,4 @@
-"""Stage 2 UI: tqdm progress bars and a background thread that keeps
-elapsed/ETA + the latest postfix live even when the bar isn't ticking.
-
-Private to ``sgl_eval.runner``. The public ``run_examples`` builds bars
-once at start, threads ``tick`` through the executor, and tears bars
-down in its ``finally`` block.
-"""
+"""tqdm bars + background refresher so elapsed/ETA stay live between ticks."""
 
 from __future__ import annotations
 
@@ -19,8 +13,8 @@ TickFn = Callable[[int, float], None]
 def _build_progress(
     name: str, num_examples: int, n_repeats: int, *, enabled: bool
 ) -> Tuple[List[tqdm], TickFn]:
-    """Build per-repeat bars + an overall bar; tick updates count and a
-    running ``acc`` postfix on the relevant bars."""
+    """Per-repeat bars + an overall bar; ``tick`` updates the running
+    ``acc`` postfix."""
     if not enabled:
         return [], lambda _idx, _score: None
 
@@ -85,10 +79,9 @@ def _build_progress(
 def _start_bar_refresher(
     bars: List[tqdm], interval: float = 0.5
 ) -> Tuple[threading.Event, threading.Thread]:
-    """Periodically call ``bar.refresh()`` on every bar so elapsed/ETA and
-    the latest postfix stay live even when that specific bar isn't ticking.
-    Returns ``(stop_event, thread)`` so the caller can ``stop.set()`` then
-    ``thread.join()`` for clean teardown before closing bars."""
+    """Daemon that calls ``bar.refresh()`` on every bar each ``interval``.
+    Returns ``(stop_event, thread)`` -- caller does ``stop.set()`` then
+    ``thread.join()`` BEFORE closing bars to avoid a teardown race."""
     stop = threading.Event()
 
     def loop() -> None:

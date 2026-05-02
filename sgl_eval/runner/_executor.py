@@ -1,12 +1,5 @@
-"""Stage 2 internals: thread-pool sample/score loop + result assembly.
-
-Private to ``sgl_eval.runner``. The split from ``__init__`` is by pipeline
-substage -- this module is the producer of ``per_example`` data; the
-public ``run_examples`` orchestrator wraps it with progress UI and final
-aggregation. Future replay paths (read predictions JSONL, reconstruct
-samples) will reuse ``_assemble_results`` directly without going through
-the live executor.
-"""
+"""Thread-pool sample/score loop + result assembly. Producer of
+``per_example`` data; future replay paths reuse ``_assemble_results``."""
 
 from __future__ import annotations
 
@@ -15,8 +8,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from sgl_eval.types import Example, ExampleResult, Sample
 
-# These aliases are duplicated from the public ``__init__`` to avoid an
-# import cycle. Keep them in sync if the protocol changes.
+# Duplicated from public ``__init__`` to avoid an import cycle. Keep in sync.
 TickFn = Callable[[int, float], None]
 SampleFn = Callable[..., Sample]
 ScoreOneFn = Callable[[Example, Sample], Tuple[float, Optional[str]]]
@@ -36,8 +28,7 @@ def _run_sample_score_phase(
     tick: TickFn,
     on_sample_scored: Optional[OnSampleScoredFn],
 ) -> None:
-    # Avoid a circular import: ``WorkerAborted`` lives in the package
-    # ``__init__``, which imports this module. Pull it in lazily here.
+    # Lazy import: WorkerAborted lives in __init__, which imports this module.
     from sgl_eval.runner import WorkerAborted
 
     def record(ex: Example, rep: int, sample: Sample) -> None:
@@ -64,8 +55,8 @@ def _run_sample_score_phase(
             try:
                 sample = fut.result()
             except WorkerAborted:
-                # Cooperative cancellation: queued sibling workers will hit
-                # this path too -- they short-circuit at the sampler entry.
+                # Queued siblings hit the same path -- they short-circuit
+                # at the sampler entry.
                 continue
             record(ex_by_id[ex_id], rep, sample)
 
@@ -76,10 +67,8 @@ def _assemble_results(
     scores_by_ex: Dict[str, List[float]],
     extracted_by_ex: Dict[str, List[Optional[str]]],
 ) -> List[ExampleResult]:
-    """Filter out repeats whose sample never completed (partial-run case
-    where the runner was aborted mid-flight). Keeps samples / scores /
-    extracted aligned in length so downstream aggregators see consistent
-    triples. Examples with zero completed repeats are dropped entirely."""
+    """Drop repeats with no sample (partial runs); keep samples/scores/
+    extracted aligned. Examples with zero reps completed are dropped."""
     results: List[ExampleResult] = []
     for ex in examples:
         samples: List[Sample] = []

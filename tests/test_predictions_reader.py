@@ -1,9 +1,4 @@
-"""``PredictionsReader`` tests.
-
-The reader is symmetric to ``PredictionsWriter``: write some samples
-through the live writer, read them back, verify shape + ordering.
-Replay and analysis paths build on this round-trip.
-"""
+"""``PredictionsReader`` round-trip tests against the live writer."""
 
 from __future__ import annotations
 
@@ -22,8 +17,6 @@ def _sample(text: str = "ans") -> Sample:
 
 
 def _seed_run_dir(run_dir: Path, n_repeats: int) -> None:
-    """Write a small run via the live writer so reader and writer
-    contracts stay in lockstep."""
     with PredictionsWriter(run_dir, n_repeats=n_repeats) as w:
         for ex_i in range(2):
             for rep in range(n_repeats):
@@ -46,29 +39,27 @@ def test_iter_all_covers_every_rep(tmp_path: Path) -> None:
 
 
 def test_n_repeats_autodetect(tmp_path: Path) -> None:
-    """No ``n_repeats`` arg -> detect from ``output-rs*.jsonl`` filenames."""
     _seed_run_dir(tmp_path, n_repeats=4)
     assert PredictionsReader(tmp_path).n_repeats == 4
 
 
 def test_n_repeats_override(tmp_path: Path) -> None:
-    """Explicit ``n_repeats`` wins over filesystem (e.g. caller knows the
-    run was supposed to be 8 reps but aborted after 3)."""
+    """Explicit ``n_repeats`` wins; covers a partial run that aborted
+    before higher reps wrote anything."""
     _seed_run_dir(tmp_path, n_repeats=2)
     assert PredictionsReader(tmp_path, n_repeats=8).n_repeats == 8
 
 
 def test_iter_rep_missing_file_is_empty(tmp_path: Path) -> None:
-    """Asking for a rep whose file doesn't exist yields nothing instead
-    of raising -- partial-run analysis paths shouldn't have to special-
-    case missing reps."""
+    """Missing rep yields nothing instead of raising, so partial-run
+    analysis paths don't need to special-case it."""
     _seed_run_dir(tmp_path, n_repeats=1)
     assert list(PredictionsReader(tmp_path, n_repeats=4).iter_rep(3)) == []
 
 
 def test_round_trip_preserves_fields(tmp_path: Path) -> None:
-    """Shape parity: every field the writer puts on disk is readable back
-    verbatim (so replay can reconstruct ``Sample`` and ``score``)."""
+    """Every writer field is readable back verbatim -- replay relies on
+    this to reconstruct ``Sample`` and ``score``."""
     with PredictionsWriter(tmp_path, n_repeats=1) as w:
         w(_ex(7), 0, _sample("response-X"), 1.0, "42")
 

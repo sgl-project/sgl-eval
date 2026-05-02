@@ -1,28 +1,12 @@
-"""Stage 2 entry: ``run_examples`` orchestrates per-(example, repeat)
-sampling + scoring and assembles the per-example result set.
+"""Stage 2 entry: parallel sample + main-thread score over (example, repeat)
+pairs, then assemble. Scoring stays on the main thread so signal-based
+grader timeouts (math_verify) work and live accuracy can render on the
+progress bars. Internals: ``_executor`` (sample/score loop + assembly),
+``_progress`` (tqdm bars).
 
-Public protocol:
-
+Protocol:
     sample_fn(example, repeat_idx) -> Sample
     score_one_fn(example, sample)  -> (score, extracted)
-
-Internals are split into private siblings:
-
-  - ``_executor`` -- thread-pool sample loop + result assembly
-  - ``_progress`` -- tqdm progress bars and live refresher
-
-The pipeline is two-phase per call:
-
-  Phase 1 (parallel sample + serial score):
-    Worker threads run ``sample_fn(ex, rep)`` over every (example,
-    repeat) pair. As each future completes, the main thread calls
-    ``score_one_fn(ex, sample)``. Scoring stays on the main thread so
-    graders that use signal-based timeouts (math_verify) work without
-    ceremony, and the running accuracy can be displayed live on the
-    progress bars.
-  Phase 2:
-    Assemble ``ExampleResult`` from the already-collected samples and
-    scores. No additional grading.
 """
 
 from __future__ import annotations
@@ -37,19 +21,15 @@ from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
 
 class WorkerAborted(Exception):
-    """Raised by ``sample_fn`` to tell the runner this ``(example, repeat)``
-    pair was abandoned mid-flight (e.g. CLI Ctrl-C closed the underlying
-    transport). The runner skips the pair, drops examples with no completed
-    repeats, and reports ``RunResult.partial = True``. Any sampler /
-    transport that wants to participate in cooperative cancellation should
-    raise this (or a subclass) from inside ``sample_fn``."""
+    """Cooperative-cancel signal from ``sample_fn`` (e.g. CLI Ctrl-C closed
+    the transport). Runner drops the pair and sets ``RunResult.partial``."""
 
 
 TickFn = Callable[[int, float], None]
 SampleFn = Callable[..., Sample]
 ScoreOneFn = Callable[[Example, Sample], Tuple[float, Optional[str]]]
-# Called once per (example, repeat) immediately after scoring, on whatever
-# thread completed the future. Implementations must be thread-safe.
+# Streaming-dump hook; fires on whatever thread completed the future, so
+# implementations must be thread-safe.
 OnSampleScoredFn = Callable[[Example, int, Sample, float, Optional[str]], None]
 
 __all__ = [
@@ -105,11 +85,9 @@ def run_examples(
         )
         results = _assemble_results(examples, samples_by_ex, scores_by_ex, extracted_by_ex)
     finally:
-        # Stop the refresher *and* join it BEFORE closing bars; otherwise
-        # the daemon may still be inside a ``bar.refresh()`` call when
-        # main exits, leaving stray bar text on the terminal that the
-        # shell tries to interpret as commands ("zsh: command not found:
-        # aime25", etc.).
+        # Join refresher BEFORE closing bars; otherwise the daemon can be
+        # mid ``bar.refresh()`` at exit and leak bar text into the shell
+        # ("zsh: command not found: aime25").
         if stop_refresh is not None:
             stop_refresh.set()
         if refresh_thread is not None:
