@@ -3,7 +3,7 @@
 Subcommands:
   list                 enumerate registered benchmarks
   ping                 send one chat completion to the endpoint and print it
-  run <name>           run a benchmark end-to-end (orchestrated by ``runtime``)
+  run <name>           run a benchmark end-to-end (orchestrated by ``pipeline``)
   preset list/show     manage saved (model, dataset, sampling) presets
 """
 
@@ -13,9 +13,9 @@ import argparse
 import sys
 from typing import List, Optional
 
+from sgl_eval.pipeline import cmd_run
 from sgl_eval.preset import add_preset_run_flag, register_preset_subcommand
 from sgl_eval.registry import list_evals
-from sgl_eval.runtime import cmd_run
 from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import GenConfig
 

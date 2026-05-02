@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sgl_eval.runtime.report import _format_partial_summary, _partial_stats, _score_bounds
+from sgl_eval.pipeline.report import _format_partial_summary, _partial_stats, _score_bounds
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
 

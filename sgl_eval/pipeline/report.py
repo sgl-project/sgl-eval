@@ -12,8 +12,8 @@ import yaml
 from sgl_eval import VENDORED_NS_ROOT
 from sgl_eval import __version__ as _SGL_EVAL_VERSION
 from sgl_eval.metrics import dump_run, format_summary
+from sgl_eval.pipeline.setup import RunContext
 from sgl_eval.preset import make_run_meta_block, print_expected_vs_actual
-from sgl_eval.runtime.setup import RunContext
 from sgl_eval.types import RunResult
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from sgl_eval.runtime import report, setup
+from sgl_eval.pipeline import report, setup
 
 
 def cmd_run(args: argparse.Namespace) -> int:
