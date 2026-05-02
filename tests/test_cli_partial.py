@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sgl_eval.cli import _example_breakdown, _format_partial_summary, _score_bounds
+from sgl_eval.cli import _format_partial_summary, _partial_stats, _score_bounds
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
 
@@ -58,11 +58,41 @@ def _ex_result(ex_id, scores):
     )
 
 
+def test_partial_stats_single_walk():
+    """One pass over ``per_example`` covers samples, scores, and the
+    full/partial/dropped buckets in one go."""
+    per_example = [
+        _ex_result("a", [1.0, 1.0, 1.0]),  # full, 3 correct
+        _ex_result("b", [1.0, 1.0]),  # part (2/3), 2 correct
+        _ex_result("c", [0.0]),  # part (1/3), 0 correct
+    ]
+    # planned 5, only 3 in per_example -> 2 dropped, planned_samples=15
+    result = _make_result(per_example, planned_examples=5, n_repeats=3)
+    stats = _partial_stats(result)
+    assert stats.completed_samples == 6
+    assert stats.planned_samples == 15
+    assert stats.unfinished_samples == 9
+    assert (stats.full, stats.part, stats.dropped) == (1, 2, 2)
+    # n_correct = 5; worst = 5/15, best = (5+9)/15
+    assert stats.worst == 5 / 15
+    assert stats.best == 14 / 15
+
+
+def test_partial_stats_all_full_no_dropped():
+    """Edge case: every rep done for every example -- partial flag may
+    still fire from elsewhere, but the buckets all collapse correctly."""
+    per_example = [_ex_result("a", [1.0, 1.0]), _ex_result("b", [0.0, 1.0])]
+    result = _make_result(per_example, planned_examples=2, n_repeats=2)
+    stats = _partial_stats(result)
+    assert (stats.full, stats.part, stats.dropped) == (2, 0, 0)
+    assert stats.unfinished_samples == 0
+
+
 def test_partial_summary_n_repeats_1():
     """n_repeats=1 path uses example-level progress and shows [worst, best]."""
     per_example = [_ex_result(str(i), [1.0]) for i in range(3)]  # 3/10 examples, all correct
     result = _make_result(per_example, planned_examples=10, n_repeats=1)
-    out = _format_partial_summary(result)
+    out = _format_partial_summary(result, _partial_stats(result))
     assert "3 / 10 examples completed" in out
     assert "(7 unfinished)" in out
     assert "score range: [30.00%, 100.00%]" in out
@@ -78,29 +108,8 @@ def test_partial_summary_n_repeats_gt_1():
     # ex2, ex3: missing from per_example -> dropped
     per_example = [_ex_result("0", [1.0, 0.0, 0.0]), _ex_result("1", [1.0])]
     result = _make_result(per_example, planned_examples=4, n_repeats=3)
-    out = _format_partial_summary(result)
+    out = _format_partial_summary(result, _partial_stats(result))
     assert "4 / 12 samples completed" in out
     assert "(8 unfinished, n_repeats=3)" in out
     assert "examples: 1 full / 1 partial / 2 dropped (4 planned)" in out
     assert "score range: [16.67%, 83.33%]" in out
-
-
-def test_example_breakdown_buckets():
-    """full = all reps done, partial = some reps done, dropped = none done."""
-    per_example = [
-        _ex_result("a", [1.0, 1.0, 1.0]),  # full
-        _ex_result("b", [1.0, 1.0]),  # partial
-        _ex_result("c", [1.0]),  # partial
-    ]
-    # planned 5, only 3 in per_example -> 2 dropped
-    result = _make_result(per_example, planned_examples=5, n_repeats=3)
-    full, part, dropped = _example_breakdown(result)
-    assert (full, part, dropped) == (1, 2, 2)
-
-
-def test_example_breakdown_all_full():
-    """No partial, no dropped -- but partial=True flag could still fire if
-    e.g. another tracking field said so. Helper just buckets."""
-    per_example = [_ex_result("a", [1.0, 1.0]), _ex_result("b", [0.0, 1.0])]
-    result = _make_result(per_example, planned_examples=2, n_repeats=2)
-    assert _example_breakdown(result) == (2, 0, 0)

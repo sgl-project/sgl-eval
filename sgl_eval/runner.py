@@ -141,19 +141,22 @@ def _run_sample_score_phase(
     tick: TickFn,
     on_sample_scored: Optional[OnSampleScoredFn],
 ) -> None:
+    def record(ex: Example, rep: int, sample: Sample) -> None:
+        samples_by_ex[ex.id][rep] = sample
+        score, extracted = score_one_fn(ex, sample)
+        scores_by_ex[ex.id][rep] = score
+        extracted_by_ex[ex.id][rep] = extracted
+        if on_sample_scored is not None:
+            on_sample_scored(ex, rep, sample, score, extracted)
+        tick(rep, score)
+
     if workers == 1:
         for ex, rep in tasks:
             try:
                 sample = sample_fn(ex, rep)
             except WorkerAborted:
                 return
-            samples_by_ex[ex.id][rep] = sample
-            score, extracted = score_one_fn(ex, sample)
-            scores_by_ex[ex.id][rep] = score
-            extracted_by_ex[ex.id][rep] = extracted
-            if on_sample_scored is not None:
-                on_sample_scored(ex, rep, sample, score, extracted)
-            tick(rep, score)
+            record(ex, rep, sample)
         return
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(sample_fn, ex, rep): (ex.id, rep) for ex, rep in tasks}
@@ -162,19 +165,10 @@ def _run_sample_score_phase(
             try:
                 sample = fut.result()
             except WorkerAborted:
-                # Cooperative cancellation: sample_fn signaled this pair
-                # was abandoned (e.g. CLI Ctrl-C closed the transport).
-                # Sibling workers will end up here too -- queued ones get
-                # picked up and short-circuit at the sampler's entry check.
+                # Cooperative cancellation: queued sibling workers will hit
+                # this path too -- they short-circuit at the sampler entry.
                 continue
-            samples_by_ex[ex_id][rep] = sample
-            ex = ex_by_id[ex_id]
-            score, extracted = score_one_fn(ex, sample)
-            scores_by_ex[ex_id][rep] = score
-            extracted_by_ex[ex_id][rep] = extracted
-            if on_sample_scored is not None:
-                on_sample_scored(ex, rep, sample, score, extracted)
-            tick(rep, score)
+            record(ex_by_id[ex_id], rep, sample)
 
 
 def _assemble_results(

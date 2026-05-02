@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from sgl_eval.runner import WorkerAborted
-from sgl_eval.sampler import ChatCompletionSampler, SamplerAborted
+from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import GenConfig
 
 
@@ -120,12 +120,6 @@ def test_reasoning_tokens_absent(sampler):
     assert out.reasoning_tokens is None
 
 
-def test_sampler_aborted_subclasses_worker_aborted():
-    """Runner only knows ``WorkerAborted``; sampler-side ``SamplerAborted``
-    must propagate through the runner's ``except WorkerAborted`` clause."""
-    assert issubclass(SamplerAborted, WorkerAborted)
-
-
 def test_aborted_property_reflects_event(sampler):
     """``sampler.aborted`` mirrors the internal event so callers (e.g. the
     CLI) don't need to share the ``threading.Event`` directly."""
@@ -145,14 +139,14 @@ def test_abort_before_call_raises(sampler):
         return _stub_response("hi")
 
     sampler.client.chat.completions.create = fake_create
-    with pytest.raises(SamplerAborted):
+    with pytest.raises(WorkerAborted):
         sampler([{"role": "user", "content": "hi"}])
     assert called["n"] == 0
 
 
 def test_abort_short_circuits_retry(sampler):
     """If a request fails AND abort fires before the next retry, the sampler
-    bails with ``SamplerAborted`` instead of looping through ``max_retries``."""
+    bails with ``WorkerAborted`` instead of looping through ``max_retries``."""
     sampler.max_retries = 5
     calls = {"n": 0}
 
@@ -163,7 +157,7 @@ def test_abort_short_circuits_retry(sampler):
         raise RuntimeError("boom")
 
     sampler.client.chat.completions.create = failing_create
-    with pytest.raises(SamplerAborted):
+    with pytest.raises(WorkerAborted):
         sampler([{"role": "user", "content": "hi"}])
     assert calls["n"] == 1  # no retries after abort
 

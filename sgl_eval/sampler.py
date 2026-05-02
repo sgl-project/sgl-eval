@@ -23,13 +23,6 @@ from sgl_eval.types import GenConfig, MessageList, Sample
 LOG = logging.getLogger(__name__)
 
 
-class SamplerAborted(WorkerAborted):
-    """Sampler-side specialization of ``WorkerAborted``: ``abort()`` was
-    called mid-flight. Bypasses the retry loop and propagates out of the
-    worker; the runner catches it as ``WorkerAborted`` without knowing the
-    sampler exists."""
-
-
 class _LargeHttpxClient(httpx.Client):
     """httpx client tuned for long-running reasoning generations."""
 
@@ -68,7 +61,7 @@ class ChatCompletionSampler:
 
         In-flight ``chat.completions.create(...)`` calls raise immediately;
         the retry loop short-circuits on the abort flag and re-raises
-        ``SamplerAborted``. Idempotent.
+        ``WorkerAborted``. Idempotent.
         """
         self._abort_event.set()
         try:
@@ -95,7 +88,7 @@ class ChatCompletionSampler:
 
         for trial in range(self.max_retries):
             if self._abort_event.is_set():
-                raise SamplerAborted()
+                raise WorkerAborted()
             try:
                 start = time.time()
                 response = self.client.chat.completions.create(**kwargs)
@@ -106,7 +99,7 @@ class ChatCompletionSampler:
                 return Sample(text="", finish_reason="error", raw=e)
             except Exception as e:
                 if self._abort_event.is_set():
-                    raise SamplerAborted() from e
+                    raise WorkerAborted() from e
                 backoff = 2**trial
                 LOG.warning(
                     "Sampler exception (trial %d/%d), backing off %ds: %s",
@@ -117,7 +110,7 @@ class ChatCompletionSampler:
                 )
                 # Wake immediately if abort fires during the backoff sleep.
                 if self._abort_event.wait(backoff):
-                    raise SamplerAborted() from e
+                    raise WorkerAborted() from e
 
         LOG.error("Sampler exhausted retries; returning empty sample.")
         return Sample(text="", finish_reason="error")
