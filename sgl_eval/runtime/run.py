@@ -1,6 +1,4 @@
-"""``cmd_run`` orchestrator: walks Stage 1 (setup) -> Stage 2 (spec.run)
--> Stage 3 (report.render). Thin glue; each stage's heavy lifting lives
-in its own module."""
+"""``cmd_run``: Stage 1 (setup) -> Stage 2 (spec.run) -> Stage 3 (report)."""
 
 from __future__ import annotations
 

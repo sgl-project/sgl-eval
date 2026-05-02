@@ -1,7 +1,5 @@
-"""Stage 1: resolve CLI args, build sampler, mkdir run_dir, open writer,
-install SIGINT handler. Produces a ``RunContext`` consumed by Stage 2
-(``spec.run``) and Stage 3 (``report.render``).
-"""
+"""Stage 1: resolve args, build sampler, mkdir, install sigint. Produces
+the ``RunContext`` consumed by Stage 2 / Stage 3."""
 
 from __future__ import annotations
 
@@ -23,9 +21,7 @@ from sgl_eval.types import GenConfig
 
 @dataclass
 class RunContext:
-    """Bundle of Stage 1 outputs. Stage 2 reads ``sampler / spec / inputs /
-    writer / num_threads``; Stage 3 reads ``run_dir / inputs / sampler / args``
-    plus the run-meta fields stamped at start (``stamp``)."""
+    """Stage 1 -> Stage 2/3 handoff bag."""
 
     inputs: ResolvedRunInputs
     sampler: ChatCompletionSampler
@@ -39,8 +35,6 @@ class RunContext:
 
 
 def prepare_run(args: argparse.Namespace) -> RunContext:
-    """Resolve inputs, instantiate sampler, mkdir run dir, open writer,
-    install SIGINT handler. Returns the context for Stage 2 / Stage 3."""
     inputs = resolve_run_inputs(args, get)
     spec = get(inputs.benchmark)
 

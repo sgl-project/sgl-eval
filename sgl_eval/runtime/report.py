@@ -1,9 +1,5 @@
 """Stage 3: stdout summary + ``metrics.json`` + footer + exit code.
-
-Consumes the ``RunContext`` from Stage 1 and the ``RunResult`` from
-Stage 2. Owns partial-run reporting (sample-level accuracy bounds +
-example breakdown) since those only matter at result-time.
-"""
+Owns partial-run reporting (sample-level bounds + example breakdown)."""
 
 from __future__ import annotations
 
@@ -23,13 +19,8 @@ from sgl_eval.types import RunResult
 
 @dataclasses.dataclass(frozen=True)
 class _PartialStats:
-    """Single-walk snapshot of ``per_example`` for partial-run reporting.
-
-    ``full / part / dropped`` partition examples into clean signal
-    (every rep done), pad-distorted (some reps done -- aggregator's
-    pad-with-last fabricates the rest), and absent (no reps done,
-    not in ``per_example`` at all).
-    """
+    """Single-walk snapshot of ``per_example``. ``full / part / dropped``
+    partition examples into clean / pad-distorted / absent."""
 
     completed_samples: int
     planned_samples: int
@@ -42,12 +33,7 @@ class _PartialStats:
 
 
 def render(result: RunResult, ctx: RunContext) -> int:
-    """Print summary, dump metrics.json, print footer, return exit code.
-
-    Exit code 130 when the user pressed Ctrl-C, even if every example
-    happened to finish before abort propagated -- their intent was to
-    bail, so respect it.
-    """
+    """Print summary, dump metrics.json, print footer, return exit code."""
     print(format_summary(result))
 
     run_meta = _build_run_meta(ctx)
@@ -56,9 +42,8 @@ def render(result: RunResult, ctx: RunContext) -> int:
         run_meta["partial"] = True
         run_meta["planned_examples"] = result.planned_examples
         run_meta["completed_samples"] = stats.completed_samples
-        # Sample-level accuracy bounds: missing samples treated as all-wrong
-        # (worst) or all-correct (best). Metric-agnostic and tight; tells the
-        # user how much the partial run is worth.
+        # Sample-level bounds: missing samples treated as all-wrong / all-
+        # correct. Metric-agnostic; tells the user how much the run is worth.
         run_meta["score_lower_bound"] = stats.worst
         run_meta["score_upper_bound"] = stats.best
         if result.n_repeats > 1:
@@ -79,6 +64,7 @@ def render(result: RunResult, ctx: RunContext) -> int:
     else:
         print_expected_vs_actual(result, ctx.inputs.preset)
 
+    # 130 even when result is complete: respect user's Ctrl-C intent.
     return 130 if ctx.sampler.aborted else 0
 
 
@@ -95,10 +81,9 @@ def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
 
 
 def _read_ns_commit_sha() -> Optional[str]:
-    """Vendored slice's pinned upstream SHA (``SOURCES.yaml``). Returns
-    ``None`` only when the manifest is absent (e.g. running from a non-
-    standard checkout); a malformed manifest is a sync_vendored bug and
-    should surface as a YAMLError, not be swallowed."""
+    """Vendored slice's pinned SHA. ``None`` only when the manifest is
+    absent; a malformed manifest is a sync_vendored bug and should surface
+    as YAMLError, not be swallowed."""
     manifest = VENDORED_NS_ROOT / "SOURCES.yaml"
     try:
         text = manifest.read_text()
@@ -108,8 +93,7 @@ def _read_ns_commit_sha() -> Optional[str]:
 
 
 def _partial_stats(result: RunResult) -> _PartialStats:
-    """Walk ``result.per_example`` once and bundle every count we need
-    to populate ``run_meta`` and the ``[partial]`` footer."""
+    """Single walk of ``per_example`` -> all counts for run_meta + footer."""
     n_repeats = result.n_repeats
     completed = 0
     n_correct = 0.0
@@ -139,13 +123,8 @@ def _partial_stats(result: RunResult) -> _PartialStats:
 def _score_bounds(
     n_correct: float, completed_samples: int, planned_samples: int
 ) -> tuple[float, float]:
-    """Sample-level accuracy bounds for a partial run.
-
-    Lower bound: missing samples are all wrong. Upper bound: missing
-    samples are all correct. Metric-agnostic -- whatever the aggregator
-    does, accuracy must fall in [worst, best]. Returns (worst, best) in
-    [0.0, 1.0].
-    """
+    """``(worst, best)`` sample-level accuracy bounds: missing samples
+    treated as all-wrong / all-correct. Metric-agnostic."""
     if planned_samples <= 0:
         return 0.0, 0.0
     n_missing = planned_samples - completed_samples
@@ -153,18 +132,10 @@ def _score_bounds(
 
 
 def _format_partial_summary(result: RunResult, stats: _PartialStats) -> str:
-    """``[partial]`` footer: how much got done + worst/best score bounds.
-
-    Progress line uses sample-level counts when ``n_repeats > 1`` (per-
-    example pad-with-last makes pure example counts misleading there);
-    example-level otherwise (equivalent). For ``n_repeats > 1`` we also
-    surface the full / partial / dropped example breakdown -- ``partial``
-    examples are the ones whose pad-with-last actively skews metrics,
-    so the count matters for trusting the score bounds.
-
-    Score bounds are always sample-level so they're comparable across
-    n_repeats settings.
-    """
+    """``[partial]`` footer. ``n_repeats > 1`` reports sample-level counts
+    + full/partial/dropped breakdown (pad-with-last skews metrics on the
+    ``partial`` bucket); otherwise example-level. Score bounds always
+    sample-level for comparability across n_repeats."""
     lines = []
     if result.n_repeats > 1:
         lines.append(
