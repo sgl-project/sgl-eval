@@ -30,6 +30,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
+from sgl_eval.sampler import SamplerAborted
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
 TickFn = Callable[[int, float], None]
@@ -129,7 +130,10 @@ def _run_sample_score_phase(
 ) -> None:
     if workers == 1:
         for ex, rep in tasks:
-            sample = sample_fn(ex, rep)
+            try:
+                sample = sample_fn(ex, rep)
+            except SamplerAborted:
+                return
             samples_by_ex[ex.id][rep] = sample
             score, extracted = score_one_fn(ex, sample)
             scores_by_ex[ex.id][rep] = score
@@ -140,17 +144,28 @@ def _run_sample_score_phase(
         return
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(sample_fn, ex, rep): (ex.id, rep) for ex, rep in tasks}
-        for fut in as_completed(futures):
-            ex_id, rep = futures[fut]
-            sample = fut.result()
-            samples_by_ex[ex_id][rep] = sample
-            ex = ex_by_id[ex_id]
-            score, extracted = score_one_fn(ex, sample)
-            scores_by_ex[ex_id][rep] = score
-            extracted_by_ex[ex_id][rep] = extracted
-            if on_sample_scored is not None:
-                on_sample_scored(ex, rep, sample, score, extracted)
-            tick(rep, score)
+        try:
+            for fut in as_completed(futures):
+                ex_id, rep = futures[fut]
+                try:
+                    sample = fut.result()
+                except SamplerAborted:
+                    # In-flight request was killed by sampler.abort(); drop
+                    # this (ex, rep) pair. Other pending workers will short-
+                    # circuit on the same abort flag and end up here too.
+                    continue
+                samples_by_ex[ex_id][rep] = sample
+                ex = ex_by_id[ex_id]
+                score, extracted = score_one_fn(ex, sample)
+                scores_by_ex[ex_id][rep] = score
+                extracted_by_ex[ex_id][rep] = extracted
+                if on_sample_scored is not None:
+                    on_sample_scored(ex, rep, sample, score, extracted)
+                tick(rep, score)
+        finally:
+            # Cancel any pending submissions; in-flight workers will surface
+            # SamplerAborted on their next abort_event check and finish fast.
+            pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _assemble_results(
@@ -159,16 +174,25 @@ def _assemble_results(
     scores_by_ex: Dict[str, List[float]],
     extracted_by_ex: Dict[str, List[Optional[str]]],
 ) -> List[ExampleResult]:
+    """Filter out repeats whose sample never completed (partial-run case
+    where the runner was aborted mid-flight). Keeps samples / scores /
+    extracted aligned in length so downstream aggregators see consistent
+    triples. Examples with zero completed repeats are dropped entirely."""
     results: List[ExampleResult] = []
     for ex in examples:
-        samples = [s for s in samples_by_ex[ex.id] if s is not None]
+        samples: List[Sample] = []
+        scores: List[float] = []
+        extracted: List[Optional[str]] = []
+        for s, sc, e in zip(samples_by_ex[ex.id], scores_by_ex[ex.id], extracted_by_ex[ex.id]):
+            if s is None:
+                continue
+            samples.append(s)
+            scores.append(sc)
+            extracted.append(e)
+        if not samples:
+            continue
         results.append(
-            ExampleResult(
-                example=ex,
-                samples=samples,
-                scores=list(scores_by_ex[ex.id]),
-                extracted=list(extracted_by_ex[ex.id]),
-            )
+            ExampleResult(example=ex, samples=samples, scores=scores, extracted=extracted)
         )
     return results
 

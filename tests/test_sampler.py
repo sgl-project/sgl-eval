@@ -8,11 +8,12 @@ the sampler builds the right request kwargs and unpacks responses into a
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 import pytest
 
-from sgl_eval.sampler import ChatCompletionSampler
+from sgl_eval.sampler import ChatCompletionSampler, SamplerAborted
 from sgl_eval.types import GenConfig
 
 
@@ -45,6 +46,7 @@ def sampler(monkeypatch):
     )
     s.model = "stub-model"
     s.max_retries = 1
+    s._abort_event = threading.Event()
     s._captured = captured
     return s
 
@@ -115,6 +117,40 @@ def test_reasoning_tokens_absent(sampler):
     NeMo-Skills' fallback in BaseMetrics.update treats it as zero."""
     out = sampler([{"role": "user", "content": "hi"}])
     assert out.reasoning_tokens is None
+
+
+def test_abort_before_call_raises(sampler):
+    """If ``abort_event`` is already set when ``__call__`` enters, the
+    sampler raises immediately without hitting the network."""
+    sampler._abort_event.set()
+    called = {"n": 0}
+
+    def fake_create(**_kwargs):
+        called["n"] += 1
+        return _stub_response("hi")
+
+    sampler.client.chat.completions.create = fake_create
+    with pytest.raises(SamplerAborted):
+        sampler([{"role": "user", "content": "hi"}])
+    assert called["n"] == 0
+
+
+def test_abort_short_circuits_retry(sampler):
+    """If a request fails AND abort fires before the next retry, the sampler
+    bails with ``SamplerAborted`` instead of looping through ``max_retries``."""
+    sampler.max_retries = 5
+    calls = {"n": 0}
+
+    def failing_create(**_kwargs):
+        calls["n"] += 1
+        # Mark abort *during* the first failure so the retry loop sees it.
+        sampler._abort_event.set()
+        raise RuntimeError("boom")
+
+    sampler.client.chat.completions.create = failing_create
+    with pytest.raises(SamplerAborted):
+        sampler([{"role": "user", "content": "hi"}])
+    assert calls["n"] == 1  # no retries after abort
 
 
 def test_bad_request_returns_empty_sample(sampler):

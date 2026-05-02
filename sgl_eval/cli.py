@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
+import signal
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -148,8 +151,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     inputs = resolve_run_inputs(args, get)
     spec = get(inputs.benchmark)
 
+    aborted = threading.Event()
     sampler = ChatCompletionSampler(
-        base_url=inputs.base_url, model=inputs.model, api_key=args.api_key
+        base_url=inputs.base_url,
+        model=inputs.model,
+        api_key=args.api_key,
+        abort_event=aborted,
     )
     _warn_if_greedy_repeats(inputs.n_repeats, inputs.gen)
 
@@ -159,6 +166,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"Run directory: {run_dir}")
 
     writer = PredictionsWriter(run_dir, inputs.n_repeats) if args.dump_predictions else None
+    prev_sigint = signal.signal(signal.SIGINT, _make_sigint_handler(sampler, aborted))
     try:
         result = spec.run(
             sampler=sampler,
@@ -171,11 +179,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     finally:
         if writer is not None:
             writer.close()
+        signal.signal(signal.SIGINT, prev_sigint)
 
+    is_partial = aborted.is_set()
     print(format_summary(result))
     run_meta = _build_run_meta(
         args=args, sampler=sampler, gen=inputs.gen, stamp=stamp, base_url=inputs.base_url
     )
+    if is_partial:
+        run_meta["partial"] = True
+        run_meta["completed_examples"] = len(result.per_example)
     preset_block = make_run_meta_block(args, inputs.preset)
     if preset_block:
         run_meta["preset"] = preset_block
@@ -183,8 +196,36 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"\nMetrics: {metrics_path}")
     if writer is not None:
         print(f"Predictions: {run_dir}  ({inputs.n_repeats} jsonl file(s))")
+    if is_partial:
+        print(
+            f"\n[partial] aborted after {len(result.per_example)} example(s); "
+            "expected_vs_actual skipped (partial runs aren't comparable to baselines).",
+            file=sys.stderr,
+        )
+        return 130
     print_expected_vs_actual(result, inputs.preset)
     return 0
+
+
+def _make_sigint_handler(sampler: ChatCompletionSampler, aborted: threading.Event) -> Any:
+    """First Ctrl-C: kill in-flight requests and flag for partial dump.
+    Second Ctrl-C: hard-exit (escape hatch if partial cleanup hangs)."""
+    state = {"count": 0}
+
+    def _handler(_signum: int, _frame: Any) -> None:
+        state["count"] += 1
+        if state["count"] >= 2:
+            print("\nSecond Ctrl-C; exiting hard.", file=sys.stderr)
+            os._exit(130)
+        print(
+            "\nAborting; killing in-flight requests, dumping partial results "
+            "(press Ctrl-C again to force-exit)...",
+            file=sys.stderr,
+        )
+        sampler.abort()
+        aborted.set()
+
+    return _handler
 
 
 def _build_run_meta(

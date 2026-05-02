@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 
 from sgl_eval.runner import run_examples
+from sgl_eval.sampler import SamplerAborted
 from sgl_eval.types import Example, Sample
 
 
@@ -81,6 +82,73 @@ def test_runner_n_repeats_flat_concurrency():
     assert result.n_repeats == 8
     assert len(submitted) == 4 * 8
     assert result.total_completion_tokens == 4 * 8
+
+
+def test_runner_drops_aborted_samples_serial():
+    """When ``sample_fn`` raises ``SamplerAborted`` (i.e. CLI Ctrl-C closed
+    the httpx client), the serial runner stops, drops examples with no
+    completed repeats, and aligns samples / scores / extracted so partial
+    aggregation works."""
+    examples = [Example(id=str(i), inputs={}, target="x") for i in range(4)]
+
+    counter = {"n": 0}
+
+    def flaky_sample_fn(ex, _rep_idx):
+        counter["n"] += 1
+        if counter["n"] > 2:
+            raise SamplerAborted()
+        return Sample(text="x", completion_tokens=1, finish_reason="stop")
+
+    result = run_examples(
+        "dummy",
+        examples,
+        flaky_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=1,
+        n_repeats=1,
+        progress=False,
+    )
+
+    assert result.num_examples == 2
+    for r in result.per_example:
+        assert len(r.samples) == len(r.scores) == len(r.extracted) == 1
+        assert r.samples[0].text == "x"
+    assert result.aggregate["score"] == 1.0
+
+
+def test_runner_drops_aborted_samples_parallel():
+    """Parallel path: an ``as_completed`` worker raising ``SamplerAborted``
+    is skipped without poisoning sibling workers' results. We can't
+    guarantee which ones complete (thread interleaving), but the invariant
+    holds: every returned ExampleResult has aligned, non-empty triples."""
+    examples = [Example(id=str(i), inputs={}, target="x") for i in range(8)]
+
+    abort_event = threading.Event()
+    completed = {"n": 0}
+    lock = threading.Lock()
+
+    def flaky_sample_fn(_ex, _rep_idx):
+        with lock:
+            completed["n"] += 1
+            if completed["n"] >= 3:
+                abort_event.set()
+        if abort_event.is_set() and completed["n"] >= 3:
+            raise SamplerAborted()
+        return Sample(text="x", completion_tokens=1, finish_reason="stop")
+
+    result = run_examples(
+        "dummy",
+        examples,
+        flaky_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=4,
+        n_repeats=1,
+        progress=False,
+    )
+
+    assert 0 < result.num_examples <= len(examples)
+    for r in result.per_example:
+        assert len(r.samples) == len(r.scores) == len(r.extracted) >= 1
 
 
 def test_runner_invokes_on_sample_scored():
