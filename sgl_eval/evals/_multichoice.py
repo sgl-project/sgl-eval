@@ -24,8 +24,8 @@ _mcq_mod.tqdm = lambda iterable, **_kwargs: iterable
 
 from sgl_eval._vendored.nemo_skills.evaluator.mcq import eval_mcq  # noqa: E402
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics  # noqa: E402
-from sgl_eval.predictions import PredictionsWriter, sample_to_pred  # noqa: E402
 from sgl_eval.evals._prompts import render_prompt  # noqa: E402
+from sgl_eval.predictions import PredictionsWriter, sample_to_pred  # noqa: E402
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples  # noqa: E402
 from sgl_eval.sampler import ChatCompletionSampler  # noqa: E402
 from sgl_eval.types import Example, ExampleResult, GenConfig, RunResult, Sample  # noqa: E402
