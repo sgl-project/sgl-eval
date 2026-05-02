@@ -154,28 +154,24 @@ def _run_sample_score_phase(
         return
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(sample_fn, ex, rep): (ex.id, rep) for ex, rep in tasks}
-        try:
-            for fut in as_completed(futures):
-                ex_id, rep = futures[fut]
-                try:
-                    sample = fut.result()
-                except WorkerAborted:
-                    # Cooperative cancellation: sample_fn signaled this pair
-                    # was abandoned (e.g. CLI Ctrl-C closed the transport).
-                    # Sibling workers will end up here too.
-                    continue
-                samples_by_ex[ex_id][rep] = sample
-                ex = ex_by_id[ex_id]
-                score, extracted = score_one_fn(ex, sample)
-                scores_by_ex[ex_id][rep] = score
-                extracted_by_ex[ex_id][rep] = extracted
-                if on_sample_scored is not None:
-                    on_sample_scored(ex, rep, sample, score, extracted)
-                tick(rep, score)
-        finally:
-            # Cancel any pending submissions; in-flight workers will surface
-            # WorkerAborted on their next abort_event check and finish fast.
-            pool.shutdown(wait=False, cancel_futures=True)
+        for fut in as_completed(futures):
+            ex_id, rep = futures[fut]
+            try:
+                sample = fut.result()
+            except WorkerAborted:
+                # Cooperative cancellation: sample_fn signaled this pair
+                # was abandoned (e.g. CLI Ctrl-C closed the transport).
+                # Sibling workers will end up here too -- queued ones get
+                # picked up and short-circuit at the sampler's entry check.
+                continue
+            samples_by_ex[ex_id][rep] = sample
+            ex = ex_by_id[ex_id]
+            score, extracted = score_one_fn(ex, sample)
+            scores_by_ex[ex_id][rep] = score
+            extracted_by_ex[ex_id][rep] = extracted
+            if on_sample_scored is not None:
+                on_sample_scored(ex, rep, sample, score, extracted)
+            tick(rep, score)
 
 
 def _assemble_results(
