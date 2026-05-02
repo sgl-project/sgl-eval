@@ -123,7 +123,16 @@ def _build_loader(entry: dict):
 def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Callable):
     if metrics_type == "math":
 
-        def run(*, sampler, gen, n_repeats, num_examples, num_threads, predictions_writer=None):
+        def run(
+            *,
+            sampler,
+            gen,
+            n_repeats,
+            num_examples,
+            num_threads,
+            predictions_writer=None,
+            load_examples=None,
+        ):
             return run_math_benchmark(
                 name=name,
                 sampler=sampler,
@@ -131,7 +140,7 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
                 n_repeats=n_repeats,
                 num_examples=num_examples,
                 num_threads=num_threads,
-                load_examples=loader,
+                load_examples=load_examples or loader,
                 predictions_writer=predictions_writer,
             )
 
@@ -139,7 +148,16 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
     if metrics_type == "multichoice":
         prompt_yaml = vendored_prompt(prompt_basename)
 
-        def run(*, sampler, gen, n_repeats, num_examples, num_threads, predictions_writer=None):
+        def run(
+            *,
+            sampler,
+            gen,
+            n_repeats,
+            num_examples,
+            num_threads,
+            predictions_writer=None,
+            load_examples=None,
+        ):
             return run_multichoice_benchmark(
                 name=name,
                 sampler=sampler,
@@ -147,7 +165,7 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
                 n_repeats=n_repeats,
                 num_examples=num_examples,
                 num_threads=num_threads,
-                load_examples=loader,
+                load_examples=load_examples or loader,
                 prompt_yaml=prompt_yaml,
                 predictions_writer=predictions_writer,
             )

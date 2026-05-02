@@ -75,6 +75,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_false",
         help="skip streaming per-sample prediction JSONL (output-rs*.jsonl)",
     )
+    p_run.add_argument(
+        "--from-dataset",
+        default=None,
+        help="path to NS-shape jsonl ({id?, problem, expected_answer}); "
+        "replaces the vendored dataset for this run",
+    )
     p_run.set_defaults(func=cmd_run, dump_predictions=True)
 
     p_refresh = sub.add_parser(

@@ -10,13 +10,14 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, List, Optional
 
+from sgl_eval.evals._loader import load_from_path
 from sgl_eval.predictions import PredictionsWriter
 from sgl_eval.preset import ResolvedRunInputs, resolve_run_inputs
 from sgl_eval.registry import EvalSpec, get
 from sgl_eval.sampler import ChatCompletionSampler
-from sgl_eval.types import GenConfig
+from sgl_eval.types import Example, GenConfig
 
 
 @dataclass
@@ -31,6 +32,7 @@ class RunContext:
     stamp: str
     num_threads: int
     args: argparse.Namespace
+    load_examples: Optional[Callable[[Optional[int]], List[Example]]]
     _prev_sigint_handler: Any
 
 
@@ -50,6 +52,7 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
 
     writer = PredictionsWriter(run_dir, inputs.n_repeats) if args.dump_predictions else None
     prev_sigint = signal.signal(signal.SIGINT, _make_sigint_handler(sampler))
+    load_examples = load_from_path(args.from_dataset) if args.from_dataset else None
 
     return RunContext(
         inputs=inputs,
@@ -60,6 +63,7 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
         stamp=stamp,
         num_threads=args.num_threads,
         args=args,
+        load_examples=load_examples,
         _prev_sigint_handler=prev_sigint,
     )
 
