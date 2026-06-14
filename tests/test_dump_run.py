@@ -87,10 +87,19 @@ def test_summary_surfaces_finish_reason_rates() -> None:
     """``stop_rate`` / ``truncated_rate`` render in the summary alongside
     ``no_answer`` when present in the aggregate."""
     summary = format_summary(
-        _result_with({"score": 0.8, "no_answer": 0.0, "stop_rate": 0.9, "truncated_rate": 0.1})
+        _result_with(
+            {
+                "score": 0.8,
+                "no_answer": 0.0,
+                "stop_rate": 0.9,
+                "truncated_rate": 0.1,
+                "error_rate": 0.0,
+            }
+        )
     )
     assert "stop_rate" in summary and "90.00%" in summary
     assert "truncated_rate" in summary and "10.00%" in summary
+    assert "error_rate" in summary
 
 
 def test_summary_warns_on_truncation() -> None:
@@ -104,3 +113,9 @@ def test_summary_omits_finish_reason_rates_when_absent() -> None:
     summary = format_summary(_result_with({"score": 0.8, "no_answer": 0.0}))
     assert "stop_rate" not in summary
     assert "truncated_rate" not in summary
+
+
+def test_summary_warns_on_error() -> None:
+    """A nonzero error rate flags request failures (e.g. sampler BadRequest)."""
+    summary = format_summary(_result_with({"score": 0.0, "stop_rate": 0.5, "error_rate": 0.5}))
+    assert "warn: request errors" in summary

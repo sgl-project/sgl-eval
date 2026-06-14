@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from sgl_eval.runner import WorkerAborted, run_examples
 from sgl_eval.types import Example, Sample
 
@@ -208,6 +210,7 @@ def test_runner_reports_finish_reason_rates():
     )
     assert result.aggregate["stop_rate"] == 0.5
     assert result.aggregate["truncated_rate"] == 0.5
+    assert result.aggregate["error_rate"] == 0.0
 
 
 def test_runner_finish_reason_rates_exclude_none():
@@ -232,6 +235,7 @@ def test_runner_finish_reason_rates_exclude_none():
     # Denominator is 2 (None excluded), so each known reason is 1/2.
     assert result.aggregate["stop_rate"] == 0.5
     assert result.aggregate["truncated_rate"] == 0.5
+    assert result.aggregate["error_rate"] == 0.0
 
 
 def test_runner_omits_finish_reason_rates_when_all_none():
@@ -253,3 +257,28 @@ def test_runner_omits_finish_reason_rates_when_all_none():
     )
     assert "stop_rate" not in result.aggregate
     assert "truncated_rate" not in result.aggregate
+
+
+def test_runner_reports_error_rate():
+    """``error_rate`` captures samples whose ``finish_reason`` is neither
+    ``stop`` nor ``length`` (e.g. the sampler sets ``"error"`` on a failed
+    request), so request failures aren't hidden behind stop/truncated."""
+    examples = [Example(id=str(i), inputs={}, target="x") for i in range(3)]
+
+    def errored_sample_fn(ex, _rep_idx):
+        # ex0: stop, ex1: length, ex2: error (request failed).
+        reason = {"0": "stop", "1": "length", "2": "error"}[ex.id]
+        return Sample(text="x", completion_tokens=1, finish_reason=reason)
+
+    result = run_examples(
+        "dummy",
+        examples,
+        errored_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=3,
+        n_repeats=1,
+        progress=False,
+    )
+    assert result.aggregate["stop_rate"] == pytest.approx(1 / 3)
+    assert result.aggregate["truncated_rate"] == pytest.approx(1 / 3)
+    assert result.aggregate["error_rate"] == pytest.approx(1 / 3)
