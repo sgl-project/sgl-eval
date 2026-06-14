@@ -111,4 +111,14 @@ def _build_rows(agg: Dict[str, float], k: int) -> List[Tuple[bool, str, str, Opt
     if no_answer is not None:
         note = "warn: consider --max-tokens" if no_answer >= 0.05 else None
         rows.append((False, "no_answer", f"{no_answer * 100:.2f}%", note))
+
+    stop_rate = agg.get("stop_rate")
+    if stop_rate is not None:
+        rows.append((False, "stop_rate", f"{stop_rate * 100:.2f}%", None))
+    truncated_rate = agg.get("truncated_rate")
+    if truncated_rate is not None:
+        # A nonzero truncation rate means generations are running to the token
+        # cap (possible no-EOS runaway), which no_answer alone doesn't reveal.
+        note = "warn: hitting max_tokens" if truncated_rate >= 0.01 else None
+        rows.append((False, "truncated_rate", f"{truncated_rate * 100:.2f}%", note))
     return rows

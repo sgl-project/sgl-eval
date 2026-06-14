@@ -185,3 +185,71 @@ def test_runner_invokes_on_sample_scored():
     assert all(s == 1.0 for _, _, _, s, _ in received)
     assert all(extracted == str(eid) for eid, _, _, _, extracted in received)
     assert result.aggregate["score"] == 1.0
+
+
+def test_runner_reports_finish_reason_rates():
+    """``stop_rate`` / ``truncated_rate`` over samples surface no-EOS runaways
+    that ``no_answer`` (extraction failure) can't. Half the samples here hit
+    the token cap (``finish_reason="length"``)."""
+    examples = [Example(id=str(i), inputs={}, target="x") for i in range(4)]
+
+    def mixed_sample_fn(ex, _rep_idx):
+        reason = "length" if int(ex.id) % 2 == 0 else "stop"
+        return Sample(text="x", completion_tokens=1, finish_reason=reason)
+
+    result = run_examples(
+        "dummy",
+        examples,
+        mixed_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=4,
+        n_repeats=1,
+        progress=False,
+    )
+    assert result.aggregate["stop_rate"] == 0.5
+    assert result.aggregate["truncated_rate"] == 0.5
+
+
+def test_runner_finish_reason_rates_exclude_none():
+    """Samples with unknown ``finish_reason`` drop out of the denominator
+    rather than diluting the rates toward zero."""
+    examples = [Example(id=str(i), inputs={}, target="x") for i in range(3)]
+
+    def some_none_sample_fn(ex, _rep_idx):
+        # ex0: stop, ex1: length, ex2: None (excluded).
+        reason = {"0": "stop", "1": "length"}.get(ex.id)
+        return Sample(text="x", completion_tokens=1, finish_reason=reason)
+
+    result = run_examples(
+        "dummy",
+        examples,
+        some_none_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=3,
+        n_repeats=1,
+        progress=False,
+    )
+    # Denominator is 2 (None excluded), so each known reason is 1/2.
+    assert result.aggregate["stop_rate"] == 0.5
+    assert result.aggregate["truncated_rate"] == 0.5
+
+
+def test_runner_omits_finish_reason_rates_when_all_none():
+    """No known ``finish_reason`` anywhere -> keys are absent, not 0.0, so a
+    backend that never reports the field doesn't fabricate a 0% stop rate."""
+    examples = [Example(id=str(i), inputs={}, target="x") for i in range(2)]
+
+    def no_reason_sample_fn(_ex, _rep_idx):
+        return Sample(text="x", completion_tokens=1, finish_reason=None)
+
+    result = run_examples(
+        "dummy",
+        examples,
+        no_reason_sample_fn,
+        _all_correct_score_one_fn,
+        num_threads=2,
+        n_repeats=1,
+        progress=False,
+    )
+    assert "stop_rate" not in result.aggregate
+    assert "truncated_rate" not in result.aggregate

@@ -101,6 +101,10 @@ def run_examples(
     total_prompt = sum(s.prompt_tokens or 0 for r in results for s in r.samples if s)
 
     aggregate = aggregate_fn(results) if aggregate_fn else _default_aggregate(results)
+    # Merge generation-stopping rates (finish_reason) for every eval type;
+    # don't clobber if an aggregator already supplied its own.
+    for key, value in _finish_reason_rates(results).items():
+        aggregate.setdefault(key, value)
 
     planned_samples = len(examples) * n_repeats
     completed_samples = sum(len(r.samples) for r in results)
@@ -124,3 +128,18 @@ def _default_aggregate(results: List[ExampleResult]) -> Dict[str, float]:
     per_example_means = [sum(r.scores) / len(r.scores) for r in results if r.scores]
     score = sum(per_example_means) / len(per_example_means) if per_example_means else 0.0
     return {"score": score}
+
+
+def _finish_reason_rates(results: List[ExampleResult]) -> Dict[str, float]:
+    """Fraction of samples that stopped on EOS vs. hit the token cap, over
+    samples whose ``finish_reason`` is known. A high ``truncated_rate`` flags a
+    no-EOS runaway that ``no_answer`` (extraction failure) silently hides.
+    Samples with ``finish_reason=None`` are excluded from the denominator."""
+    reasons = [s.finish_reason for r in results for s in r.samples if s and s.finish_reason]
+    if not reasons:
+        return {}
+    n = len(reasons)
+    return {
+        "stop_rate": sum(fr == "stop" for fr in reasons) / n,
+        "truncated_rate": sum(fr == "length" for fr in reasons) / n,
+    }

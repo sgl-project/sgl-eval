@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from sgl_eval.metrics import dump_run
+from sgl_eval.metrics import dump_run, format_summary
 from sgl_eval.types import RunResult
 
 
@@ -68,3 +68,39 @@ def test_run_meta_overlap_with_core_field_raises(tmp_path: Path, clashing_key: s
     """Reserved core fields must not be silently overridden by run_meta."""
     with pytest.raises(ValueError, match="overlaps reserved metrics fields"):
         dump_run(_result(), tmp_path, run_meta={clashing_key: "bogus"})
+
+
+def _result_with(aggregate: dict) -> RunResult:
+    return RunResult(
+        name="test_bench",
+        per_example=[],
+        aggregate=aggregate,
+        latency=12.5,
+        num_examples=10,
+        n_repeats=1,
+        total_completion_tokens=1000,
+        total_prompt_tokens=200,
+    )
+
+
+def test_summary_surfaces_finish_reason_rates() -> None:
+    """``stop_rate`` / ``truncated_rate`` render in the summary alongside
+    ``no_answer`` when present in the aggregate."""
+    summary = format_summary(
+        _result_with({"score": 0.8, "no_answer": 0.0, "stop_rate": 0.9, "truncated_rate": 0.1})
+    )
+    assert "stop_rate" in summary and "90.00%" in summary
+    assert "truncated_rate" in summary and "10.00%" in summary
+
+
+def test_summary_warns_on_truncation() -> None:
+    """A nonzero truncation rate flags hitting max_tokens (no-EOS runaway)."""
+    summary = format_summary(_result_with({"score": 0.0, "stop_rate": 0.5, "truncated_rate": 0.5}))
+    assert "warn: hitting max_tokens" in summary
+
+
+def test_summary_omits_finish_reason_rates_when_absent() -> None:
+    """Backward compatible: an aggregate without the new keys shows no rows."""
+    summary = format_summary(_result_with({"score": 0.8, "no_answer": 0.0}))
+    assert "stop_rate" not in summary
+    assert "truncated_rate" not in summary

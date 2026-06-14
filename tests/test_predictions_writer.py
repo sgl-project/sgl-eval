@@ -41,10 +41,30 @@ def test_writes_ns_shape_record(tmp_path: Path) -> None:
     assert r["num_generated_tokens"] == 10
     assert r["num_answer_tokens"] == 10
     assert r["num_reasoning_tokens"] == 0
+    assert r["finish_reason"] == "stop"
 
     # The other repeat file is created but stays empty.
     assert (tmp_path / "output-rs1.jsonl").exists()
     assert (tmp_path / "output-rs1.jsonl").read_text() == ""
+
+
+def test_finish_reason_length_and_none_survive(tmp_path: Path) -> None:
+    """``finish_reason`` is written verbatim so downstream analysis can spot
+    no-EOS runaways (``"length"``); an unknown reason serializes as null."""
+    with PredictionsWriter(tmp_path, n_repeats=2) as w:
+        w(
+            _ex(0),
+            0,
+            Sample(text="runaway", completion_tokens=4096, finish_reason="length"),
+            0.0,
+            None,
+        )
+        w(_ex(1), 1, Sample(text="unknown", completion_tokens=10, finish_reason=None), 0.0, None)
+
+    r0 = json.loads((tmp_path / "output-rs0.jsonl").read_text().splitlines()[0])
+    r1 = json.loads((tmp_path / "output-rs1.jsonl").read_text().splitlines()[0])
+    assert r0["finish_reason"] == "length"
+    assert r1["finish_reason"] is None
 
 
 def test_routes_per_repeat(tmp_path: Path) -> None:
