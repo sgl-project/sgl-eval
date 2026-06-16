@@ -62,6 +62,13 @@ _TABLE = [
         "description": "AIME 2025 (30 problems, integer answers).",
     },
     {
+        "name": "aime26",
+        "loader": "bundled",
+        "thinking": True,
+        "default_n_repeats": 16,
+        "description": "AIME 2026 (30 problems, integer answers).",
+    },
+    {
         "name": "mmlu",
         "loader": "prepare",
         "save_args": ("test",),

@@ -76,6 +76,8 @@ files:
   - src: nemo_skills/dataset/aime25/test.txt
     dst: dataset/aime25/test.txt
     binary: true
+  - src: nemo_skills/dataset/aime26/__init__.py
+    dst: dataset/aime26/__init__.py
   - src: nemo_skills/dataset/aime24/__init__.py
     dst: dataset/aime24/__init__.py
   - src: nemo_skills/dataset/aime24/test.txt
