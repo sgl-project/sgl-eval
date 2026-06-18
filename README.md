@@ -43,6 +43,66 @@ full payload as JSON under `--out-dir`. For example:
 
 ---
 
+## Partial runs & subsetting
+
+A run doesn't have to cover the full dataset, finish to completion, or even
+use the vendored questions. Four mechanisms:
+
+### Subsetting -- `--num-examples N`
+
+Run only the first `N` examples (smoke tests, quick sanity checks). Omit it
+(or set `num_examples: null` in a preset) to run the full set.
+
+```bash
+sgl-eval run aime25 --base-url http://localhost:30000/v1 --num-examples 5
+```
+
+### Early stop -- `Ctrl-C`
+
+A run can be stopped early without losing scored work:
+
+- **First `Ctrl-C`** -- kills in-flight requests, dumps everything scored
+  so far, writes `metrics.json` flagged `partial: true`, and exits `130`.
+- **Second `Ctrl-C`** -- hard-exit (escape hatch if cleanup hangs).
+
+A partial run reports a **sample-level score range** instead of a single
+number: missing samples are counted once as all-wrong (lower bound) and
+once as all-correct (upper bound), so the true score is guaranteed to lie
+inside. The preset `expected_vs_actual` comparison is skipped (a half-run
+isn't comparable to a baseline).
+
+```
+[partial] 240 / 480 samples completed (240 unfinished, n_repeats=16)
+[partial] examples: 12 full / 6 partial / 12 dropped (30 planned)
+[partial] score range: [39.17%, 89.17%] (missing samples assumed all-wrong / all-correct)
+```
+
+### Custom dataset -- `--from-dataset <path>`
+
+Replace the vendored dataset for one run with your own NS-shape JSONL
+(`{id?, problem, expected_answer}`, one object per line). Only the
+questions change -- scoring still goes through the vendored grader.
+
+```bash
+sgl-eval run aime25 --base-url http://localhost:30000/v1 --from-dataset ./my_problems.jsonl
+```
+
+### Offline recompute -- `refresh`
+
+Every run streams per-sample predictions to
+`<out-dir>/sgl_eval_<name>_<stamp>/output-rs*.jsonl` (disable with
+`--no-dump-predictions`). `refresh` rebuilds `metrics.json` from those
+files -- re-aggregating (pass@k / majority@k / token tally / partial
+counts / score bounds) without re-sampling, and preserving provenance
+(`model` / `base_url` / `ns_commit_sha` / `preset` / ...). It makes no
+requests; a partial run refreshes into the same score range.
+
+```bash
+sgl-eval refresh ~/.sgl_eval/sgl_eval_aime25_<stamp>/
+```
+
+---
+
 ## Presets
 
 Save a `(benchmark, endpoint, sampling, n_repeats, expected)` bundle to
