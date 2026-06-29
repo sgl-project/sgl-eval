@@ -35,7 +35,10 @@ def _eval_single_sync(evaluator: MathEvaluator, data_point: Dict[str, Any]) -> D
 
 def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig) -> SampleFn:
     def sample_fn(ex: Example, _rep_idx: int) -> Sample:
-        prompt = render_math_prompt(ex.inputs["problem"])
+        if gen.system_message:
+            prompt = ex.inputs["problem"]
+        else:
+            prompt = render_math_prompt(ex.inputs["problem"])
         return sampler([{"role": "user", "content": prompt}], gen)
 
     return sample_fn

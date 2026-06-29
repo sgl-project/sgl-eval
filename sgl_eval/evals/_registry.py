@@ -38,6 +38,18 @@ from sgl_eval.evals._prompts import vendored_prompt
 from sgl_eval.registry import EvalSpec, register
 from sgl_eval.types import GenConfig
 
+_AIME_SYSTEM_PROMPT = (
+    "Your response should be in the following format:\n"
+    "Explanation: {your explanation for your final answer}\n"
+    "Exact Answer: {your succinct, final answer}\n"
+    "Confidence: {your confidence score between 0% and 100% for your answer}"
+)
+
+_AIME_EVALUATOR_CONFIG = {
+    "relaxed_extraction": True,
+    "extract_regex": r"Exact Answer:\**\s*\**\s*([^\n*]+)",
+}
+
 _TABLE = [
     {
         "name": "gsm8k",
@@ -52,6 +64,8 @@ _TABLE = [
         "loader": "bundled",
         "thinking": True,
         "default_n_repeats": 16,
+        "system_message": _AIME_SYSTEM_PROMPT,
+        "evaluator_config": _AIME_EVALUATOR_CONFIG,
         "description": "AIME 2024 (30 problems, integer answers).",
     },
     {
@@ -59,6 +73,8 @@ _TABLE = [
         "loader": "bundled",
         "thinking": True,
         "default_n_repeats": 16,
+        "system_message": _AIME_SYSTEM_PROMPT,
+        "evaluator_config": _AIME_EVALUATOR_CONFIG,
         "description": "AIME 2025 (30 problems, integer answers).",
     },
     {
@@ -66,6 +82,8 @@ _TABLE = [
         "loader": "bundled",
         "thinking": True,
         "default_n_repeats": 16,
+        "system_message": _AIME_SYSTEM_PROMPT,
+        "evaluator_config": _AIME_EVALUATOR_CONFIG,
         "description": "AIME 2026 (30 problems, integer answers).",
     },
     {
@@ -106,11 +124,13 @@ def _resolve_upstream_metadata(name: str) -> Tuple[str, str]:
     return metrics_type, prompt_config.split("/")[-1]
 
 
-def _build_default_gen(thinking: bool) -> GenConfig:
+def _build_default_gen(thinking: bool, system_message: str | None = None) -> GenConfig:
     """All NS-aligned defaults (``temperature=0.0``, ``top_p=0.95``,
-    ``max_tokens=None``); only ``chat_template_kwargs.thinking`` varies."""
+    ``max_tokens=None``); ``chat_template_kwargs.thinking`` and
+    ``system_message`` vary per benchmark."""
     return GenConfig(
         chat_template_kwargs={"thinking": True} if thinking else None,
+        system_message=system_message,
     )
 
 
@@ -127,7 +147,13 @@ def _build_loader(entry: dict):
     raise ValueError(f"unknown loader kind: {kind!r}")
 
 
-def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Callable):
+def _build_run(
+    name: str,
+    metrics_type: str,
+    prompt_basename: str,
+    loader: Callable,
+    evaluator_config: dict | None = None,
+):
     if metrics_type == "math":
 
         def run(
@@ -148,6 +174,7 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
                 num_examples=num_examples,
                 num_threads=num_threads,
                 load_examples=load_examples or loader,
+                evaluator_config=evaluator_config,
                 predictions_writer=predictions_writer,
             )
 
@@ -185,13 +212,15 @@ for _entry in _TABLE:
     _name = _entry["name"]
     _metrics_type, _prompt_basename = _resolve_upstream_metadata(_name)
     _loader = _build_loader(_entry)
-    _run = _build_run(_name, _metrics_type, _prompt_basename, _loader)
+    _run = _build_run(
+        _name, _metrics_type, _prompt_basename, _loader, _entry.get("evaluator_config")
+    )
     register(
         EvalSpec(
             name=_name,
             category=_metrics_type,
             description=_entry["description"],
-            default_gen=_build_default_gen(_entry["thinking"]),
+            default_gen=_build_default_gen(_entry["thinking"], _entry.get("system_message")),
             default_n_repeats=_entry["default_n_repeats"],
             run=_run,
         )
