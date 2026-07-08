@@ -52,6 +52,7 @@ class Sampling:
     # Mapped to ``GenConfig.chat_template_kwargs.thinking`` at apply time;
     # exposed flat here so preset YAML stays human-readable.
     thinking: Optional[bool] = None
+    reasoning_effort: Optional[str] = None
 
 
 @dataclass
@@ -212,7 +213,9 @@ def apply_to_gen(
         temperature=pick(args.temperature, p.temperature if p else None, default.temperature),
         top_p=pick(args.top_p, p.top_p if p else None, default.top_p),
         max_tokens=pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
-        reasoning_effort=default.reasoning_effort,
+        reasoning_effort=pick(
+            args.reasoning_effort, p.reasoning_effort if p else None, default.reasoning_effort
+        ),
         chat_template_kwargs=chat_template_kwargs or None,
         extra_body=default.extra_body,
         seed=default.seed,

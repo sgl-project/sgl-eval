@@ -117,7 +117,7 @@ def test_pick_treats_zero_as_set() -> None:
 
 
 def _args(**overrides) -> argparse.Namespace:
-    base = dict(temperature=None, top_p=None, max_tokens=None, thinking=None)
+    base = dict(temperature=None, top_p=None, max_tokens=None, thinking=None, reasoning_effort=None)
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -153,3 +153,19 @@ def test_apply_to_gen_thinking_priority() -> None:
     # Preset beats default
     gen = apply_to_gen(default, _preset_with(thinking=True), _args())
     assert gen.chat_template_kwargs == {"thinking": True}
+
+
+def test_apply_to_gen_reasoning_effort_priority() -> None:
+    """``reasoning_effort`` follows the same CLI > preset > default chain."""
+    default = GenConfig(reasoning_effort="max")
+    # CLI beats preset
+    gen = apply_to_gen(
+        default, _preset_with(reasoning_effort="high"), _args(reasoning_effort="low")
+    )
+    assert gen.reasoning_effort == "low"
+    # Preset beats default
+    gen = apply_to_gen(default, _preset_with(reasoning_effort="high"), _args())
+    assert gen.reasoning_effort == "high"
+    # Default applies when neither CLI nor preset sets it
+    gen = apply_to_gen(default, _preset_with(), _args())
+    assert gen.reasoning_effort == "max"

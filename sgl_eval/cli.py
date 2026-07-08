@@ -64,6 +64,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="override chat_template_kwargs.thinking (per-benchmark default applies otherwise)",
     )
     p_run.add_argument(
+        "--reasoning-effort",
+        default=None,
+        help="override reasoning_effort (per-benchmark default applies otherwise)",
+    )
+    p_run.add_argument(
         "--out-dir",
         default="~/.sgl_eval",
         help="parent dir for run folders; each run writes into "
