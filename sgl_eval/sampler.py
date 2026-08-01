@@ -138,15 +138,18 @@ class ChatCompletionSampler:
         # extra_body). Omit them and sglang resolves both from the served
         # model's generation_config.json, so an endpoint whose model ships a
         # non-default value would decode differently here than under NS.
-        extra_body: Dict[str, Any] = {
-            "min_p": gen.min_p,
-            "repetition_penalty": gen.repetition_penalty,
-        }
+        # Neither is an OpenAI API param, so --strict-openai sets both to None.
+        extra_body: Dict[str, Any] = {}
+        if gen.min_p is not None:
+            extra_body["min_p"] = gen.min_p
+        if gen.repetition_penalty is not None:
+            extra_body["repetition_penalty"] = gen.repetition_penalty
         if gen.chat_template_kwargs:
             extra_body["chat_template_kwargs"] = gen.chat_template_kwargs
         if gen.extra_body:
             extra_body.update(gen.extra_body)
-        kwargs["extra_body"] = extra_body
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         return kwargs
 
     @staticmethod

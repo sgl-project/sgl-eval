@@ -151,6 +151,15 @@ def test_apply_to_gen_seed_is_cli_only() -> None:
     assert apply_to_gen(default, preset=None, args=_args(seed=0)).seed == 0
 
 
+def test_strict_openai_drops_the_ns_sampling_extras() -> None:
+    """The escape hatch for endpoints that reject non-OpenAI params."""
+    default = GenConfig(min_p=0.0, repetition_penalty=1.0)
+    gen = apply_to_gen(default, preset=None, args=_args(strict_openai=True))
+    assert (gen.min_p, gen.repetition_penalty) == (None, None)
+    # Unset flag keeps NS alignment.
+    assert apply_to_gen(default, preset=None, args=_args()).min_p == 0.0
+
+
 def test_apply_to_gen_keeps_ns_sampling_extras() -> None:
     """``min_p`` / ``repetition_penalty`` are NS-aligned defaults carried on the
     spec's GenConfig; resolution must not drop them back to the dataclass."""

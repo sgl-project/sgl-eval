@@ -78,6 +78,15 @@ def test_min_p_and_repetition_penalty_always_sent(sampler):
     assert extra["repetition_penalty"] == 1.0
 
 
+def test_strict_openai_sends_no_extra_body(sampler):
+    """A strict OpenAI-compatible endpoint 400s on unknown body params, and the
+    sampler turns a 400 into an empty sample -- i.e. the whole run scores 0.
+    ``None`` on both fields has to leave the request free of ``extra_body``."""
+    gen = GenConfig(min_p=None, repetition_penalty=None)
+    sampler([{"role": "user", "content": "hi"}], gen)
+    assert "extra_body" not in sampler._captured["kwargs"]
+
+
 def test_explicit_extra_body_wins_over_the_ns_defaults(sampler):
     gen = GenConfig(extra_body={"repetition_penalty": 1.05})
     sampler([{"role": "user", "content": "hi"}], gen)

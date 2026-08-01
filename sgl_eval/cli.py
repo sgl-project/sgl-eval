@@ -65,6 +65,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         "sends 0, so pass --seed 0 to match its runs)",
     )
     p_run.add_argument(
+        "--strict-openai",
+        action="store_true",
+        help="omit the sampling params the OpenAI API itself rejects (min_p, "
+        "repetition_penalty). Only for endpoints that are neither sglang nor "
+        "vLLM -- both accept them, and NeMo-Skills always sends them",
+    )
+    p_run.add_argument(
         "--thinking",
         action=argparse.BooleanOptionalAction,
         default=None,

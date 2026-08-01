@@ -25,9 +25,10 @@ class GenConfig:
     top_p: float = 0.95
     max_tokens: Optional[int] = None
     # Sent on every request, like NS does. Left unsent they would resolve
-    # from the served model's generation_config.json instead.
-    min_p: float = 0.0
-    repetition_penalty: float = 1.0
+    # from the served model's generation_config.json instead. ``None`` omits
+    # them, for endpoints that reject non-OpenAI sampling params (--strict-openai).
+    min_p: Optional[float] = 0.0
+    repetition_penalty: Optional[float] = 1.0
     reasoning_effort: Optional[str] = None
     chat_template_kwargs: Optional[Dict[str, Any]] = None
     extra_body: Optional[Dict[str, Any]] = None
