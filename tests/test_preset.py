@@ -143,6 +143,22 @@ def test_apply_to_gen_priority_chain() -> None:
     assert gen.temperature == 0.6
 
 
+def test_apply_to_gen_seed_is_cli_only() -> None:
+    """``seed`` has no preset field (it is a reproducibility knob, not part of
+    the run's identity), and stays unset unless the CLI asks for it."""
+    default = GenConfig()
+    assert apply_to_gen(default, preset=None, args=_args()).seed is None
+    assert apply_to_gen(default, preset=None, args=_args(seed=0)).seed == 0
+
+
+def test_apply_to_gen_keeps_ns_sampling_extras() -> None:
+    """``min_p`` / ``repetition_penalty`` are NS-aligned defaults carried on the
+    spec's GenConfig; resolution must not drop them back to the dataclass."""
+    default = GenConfig(min_p=0.01, repetition_penalty=1.05)
+    gen = apply_to_gen(default, preset=None, args=_args())
+    assert (gen.min_p, gen.repetition_penalty) == (0.01, 1.05)
+
+
 def test_apply_to_gen_thinking_priority() -> None:
     """``thinking`` is the only sampling field that lives under
     ``chat_template_kwargs``; verify it follows the same priority chain."""

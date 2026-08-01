@@ -15,14 +15,19 @@ class GenConfig:
     sampler instance can serve multiple benchmarks with different configs.
 
     Defaults mirror NeMo-Skills' ``InferenceConfig`` (``temperature=0.0``,
-    ``top_p=0.95``, ``max_tokens=None`` => server picks a cap). Per-benchmark
-    overrides live in ``sgl_eval/evals/_registry.py``; CLI overrides live in
+    ``top_p=0.95``, ``max_tokens=None`` => server picks a cap,
+    ``min_p=0.0``, ``repetition_penalty=1.0``). Per-benchmark overrides live
+    in ``sgl_eval/evals/_registry.py``; CLI overrides live in
     ``sgl_eval/cli.py``.
     """
 
     temperature: float = 0.0
     top_p: float = 0.95
     max_tokens: Optional[int] = None
+    # Sent on every request, like NS does. Left unsent they would resolve
+    # from the served model's generation_config.json instead.
+    min_p: float = 0.0
+    repetition_penalty: float = 1.0
     reasoning_effort: Optional[str] = None
     chat_template_kwargs: Optional[Dict[str, Any]] = None
     extra_body: Optional[Dict[str, Any]] = None

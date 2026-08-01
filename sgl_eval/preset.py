@@ -201,7 +201,9 @@ def apply_to_gen(
     """Resolve a final ``GenConfig`` honoring CLI > preset > default.
 
     ``args`` must expose ``temperature``, ``top_p``, ``max_tokens``,
-    ``thinking`` (any of which may be ``None`` for "unset").
+    ``thinking`` (any of which may be ``None`` for "unset"). ``seed`` is
+    optional -- it has no preset field, being a reproducibility knob rather
+    than part of the run's identity.
     """
     p = preset.sampling if preset else None
     chat_template_kwargs = dict(default.chat_template_kwargs or {})
@@ -212,10 +214,12 @@ def apply_to_gen(
         temperature=pick(args.temperature, p.temperature if p else None, default.temperature),
         top_p=pick(args.top_p, p.top_p if p else None, default.top_p),
         max_tokens=pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
+        min_p=default.min_p,
+        repetition_penalty=default.repetition_penalty,
         reasoning_effort=default.reasoning_effort,
         chat_template_kwargs=chat_template_kwargs or None,
         extra_body=default.extra_body,
-        seed=default.seed,
+        seed=pick(getattr(args, "seed", None), default.seed),
         system_message=default.system_message,
     )
 

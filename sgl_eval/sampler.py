@@ -24,10 +24,15 @@ LOG = logging.getLogger(__name__)
 
 
 class _LargeHttpxClient(httpx.Client):
-    """httpx client tuned for long-running reasoning generations."""
+    """httpx client tuned for long-running reasoning generations.
+
+    The 4h per-call ceiling matches upstream NeMo-Skills' ``InferenceConfig``
+    ``timeout`` so a long-context run cannot diverge from an NS run by timing
+    out where NS would still be waiting.
+    """
 
     def __init__(self) -> None:
-        timeout = httpx.Timeout(3600)
+        timeout = httpx.Timeout(14400)
         limits = httpx.Limits(max_keepalive_connections=3600, max_connections=3600)
         super().__init__(timeout=timeout, limits=limits)
 
@@ -129,13 +134,19 @@ class ChatCompletionSampler:
         if gen.seed is not None:
             kwargs["seed"] = gen.seed
 
-        extra_body: Dict[str, Any] = {}
+        # NS sends min_p / repetition_penalty on every request (also via
+        # extra_body). Omit them and sglang resolves both from the served
+        # model's generation_config.json, so an endpoint whose model ships a
+        # non-default value would decode differently here than under NS.
+        extra_body: Dict[str, Any] = {
+            "min_p": gen.min_p,
+            "repetition_penalty": gen.repetition_penalty,
+        }
         if gen.chat_template_kwargs:
             extra_body["chat_template_kwargs"] = gen.chat_template_kwargs
         if gen.extra_body:
             extra_body.update(gen.extra_body)
-        if extra_body:
-            kwargs["extra_body"] = extra_body
+        kwargs["extra_body"] = extra_body
         return kwargs
 
     @staticmethod
