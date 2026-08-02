@@ -201,15 +201,11 @@ def apply_to_gen(
     """Resolve a final ``GenConfig`` honoring CLI > preset > default.
 
     ``args`` must expose ``temperature``, ``top_p``, ``max_tokens``,
-    ``thinking`` (any of which may be ``None`` for "unset"). ``seed`` and
-    ``strict_openai`` are optional -- neither has a preset field, being a
-    reproducibility knob and an endpoint-compat knob rather than part of the
-    run's identity.
+    ``thinking`` (any of which may be ``None`` for "unset"). ``seed`` is
+    optional -- it has no preset field, being a reproducibility knob rather
+    than part of the run's identity.
     """
     p = preset.sampling if preset else None
-    # Endpoints that are not sglang/vLLM 400 on these, which the sampler turns
-    # into empty samples -- i.e. a whole run scoring 0.
-    strict = bool(getattr(args, "strict_openai", False))
     chat_template_kwargs = dict(default.chat_template_kwargs or {})
     thinking = pick(args.thinking, p.thinking if p else None)
     if thinking is not None:
@@ -218,8 +214,8 @@ def apply_to_gen(
         temperature=pick(args.temperature, p.temperature if p else None, default.temperature),
         top_p=pick(args.top_p, p.top_p if p else None, default.top_p),
         max_tokens=pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
-        min_p=None if strict else default.min_p,
-        repetition_penalty=None if strict else default.repetition_penalty,
+        min_p=default.min_p,
+        repetition_penalty=default.repetition_penalty,
         reasoning_effort=default.reasoning_effort,
         chat_template_kwargs=chat_template_kwargs or None,
         extra_body=default.extra_body,
