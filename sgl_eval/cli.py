@@ -52,7 +52,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     add_preset_run_flag(p_run)
     _add_endpoint_args(p_run, base_url_required=False)
     p_run.add_argument("--num-examples", type=int, default=None)
-    p_run.add_argument("--num-threads", type=int, default=64)
+    p_run.add_argument(
+        "--num-threads",
+        type=int,
+        default=None,
+        help="concurrent requests (default: the benchmark's own ceiling, 64 for "
+        "most, lower for long-context)",
+    )
     p_run.add_argument("--n-repeats", type=int, default=None)
     p_run.add_argument("--max-tokens", type=int, default=None)
     p_run.add_argument("--temperature", type=float, default=None)
@@ -87,6 +93,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="path to NS-shape jsonl ({id?, problem, expected_answer}); "
         "replaces the vendored dataset for this run",
+    )
+    p_run.add_argument(
+        "--bench-arg",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="benchmark-specific option, repeatable. ruler2: seq_len=N (required), "
+        "tokenizer=<hf-id|path>, tokenizer_type=hf|openai, dataset_size=N, "
+        "tasks=a,b,c",
     )
     p_run.set_defaults(func=cmd_run, dump_predictions=True)
 

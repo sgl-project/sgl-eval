@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sgl_eval.metrics import dump_run, format_summary
 from sgl_eval.pipeline.report import _format_partial_summary, _partial_stats
-from sgl_eval.predictions import PredictionsReader
+from sgl_eval.predictions import PredictionsReader, PredSchema
 from sgl_eval.registry import get
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
@@ -65,7 +65,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     if reader.n_repeats == 0:
         sys.exit(f"error: no output-rs*.jsonl found in {run_dir}")
 
-    per_example = _build_per_example(reader)
+    per_example = _build_per_example(reader, spec.pred_schema)
     n_repeats = reader.n_repeats
     aggregate = _aggregate(spec.category, per_example, n_repeats)
 
@@ -145,7 +145,10 @@ def _resolve_planned_examples(
     return len(per_example)
 
 
-def _build_per_example(reader: PredictionsReader) -> List[ExampleResult]:
+def _build_per_example(reader: PredictionsReader, schema: PredSchema) -> List[ExampleResult]:
+    """``schema`` names the score field the run dumped -- a fixed
+    ``symbolic_correct`` scores every row 0 for ruler2, which writes
+    ``is_correct``."""
     by_id: Dict[str, Dict[str, Any]] = {}
     for _rep, row in reader.iter_all():
         ex_id = row["id"]
@@ -171,7 +174,11 @@ def _build_per_example(reader: PredictionsReader) -> List[ExampleResult]:
                 generation_end_time=row.get("generation_end_time"),
             )
         )
-        slot["scores"].append(1.0 if row.get("symbolic_correct") else 0.0)
+        raw_score = row.get(schema.score_field)
+        if schema.binary_score:
+            slot["scores"].append(1.0 if raw_score else 0.0)
+        else:
+            slot["scores"].append(float(raw_score or 0.0))
         slot["extracted"].append(row.get("predicted_answer"))
     return [
         ExampleResult(
@@ -185,6 +192,12 @@ def _build_per_example(reader: PredictionsReader) -> List[ExampleResult]:
 
 
 def _aggregate(category: str, per_example: List[ExampleResult], n_repeats: int) -> Dict[str, float]:
+    # Needed at every k: the headline is a mean of per-subtask means, which the
+    # sample-level fallback below only matches when subtask counts are equal.
+    if category == "ruler2":
+        from sgl_eval.evals._ruler2 import aggregate_from_predictions
+
+        return aggregate_from_predictions(per_example, n_repeats)
     if n_repeats > 1:
         if category == "math":
             from sgl_eval.evals._math import aggregate_with_math_metrics

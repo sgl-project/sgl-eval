@@ -22,6 +22,15 @@ pinned_deps:
   latex2sympy2_extended: ""     # upstream pin: unversioned
   numpy: ""                     # upstream pin: unversioned
   tqdm: ""                      # upstream pin: unversioned (used by evaluator/base.py)
+  editdistance: ""              # upstream pin: unversioned (evaluator/ruler.py WER)
+  # RULER2 dataset generation only. Kept out of the core install because
+  # nothing else needs them and `transformers` is heavy -- they live in the
+  # `longcontext` extra. All four are imported by dataset/ruler2/prepare_*.py;
+  # `transformers` / `tiktoken` are lazy (inside tokenizer.py's __init__).
+  nltk: ""
+  wonderwords: ""
+  inflect: ""
+  transformers: ""
 
 # Applied by sync_vendored.py to rewrite intra-nemo-skills imports so
 # vendored files resolve under sgl_eval._vendored.nemo_skills. Audited
@@ -35,6 +44,12 @@ import_rewrites:
   "from nemo_skills.evaluation.evaluator.math import": "from sgl_eval._vendored.nemo_skills.evaluator.math import"
   "from nemo_skills.evaluation.evaluator.mcq import": "from sgl_eval._vendored.nemo_skills.evaluator.mcq import"
   "from nemo_skills.dataset.utils import": "from sgl_eval._vendored.nemo_skills.dataset._utils import"
+  # ruler2/prepare.py spawns its sibling generators as `python -m
+  # nemo_skills.dataset.ruler2.prepare_niah` and emits SCORE_MODULE as a
+  # string literal. Both are module paths in source text rather than import
+  # statements, so the audit regex cannot see them -- rewrite the dotted
+  # prefix so the subprocess resolves under _vendored.
+  "nemo_skills.dataset.ruler2.": "sgl_eval._vendored.nemo_skills.dataset.ruler2."
 
 # Files synced verbatim from upstream (with rewrites + drop_functions +
 # drop_imports applied, plus a provenance banner for .py / .yaml).
@@ -65,6 +80,10 @@ files:
       - nemo_skills.code_execution
   - src: nemo_skills/evaluation/evaluator/mcq.py
     dst: evaluator/mcq.py
+  - src: nemo_skills/evaluation/evaluator/ruler.py
+    dst: evaluator/ruler.py
+  - src: nemo_skills/evaluation/metrics/ruler2_metrics.py
+    dst: ruler2_metrics.py
 
   # --- dataset utilities ---
   - src: nemo_skills/dataset/utils.py
@@ -96,6 +115,33 @@ files:
   - src: nemo_skills/dataset/gpqa/prepare.py
     dst: dataset/gpqa/prepare.py
 
+  # --- RULER2 (synthetic long-context; generated per tokenizer + seq length) ---
+  # Upstream ships no test split for this one: `__init__.py` is just
+  # REQUIRES_DATA_DIR = True, and the 12 subtasks are generated locally. Note
+  # sgl-eval calls the per-task `prepare_<task>(output_folder, ...)` functions
+  # directly rather than `prepare_dataset`, whose output_folder is hardcoded to
+  # `Path(__file__).parent / setup` -- i.e. it would write into _vendored.
+  - src: nemo_skills/dataset/ruler2/__init__.py
+    dst: dataset/ruler2/__init__.py
+  - src: nemo_skills/dataset/ruler2/prepare.py
+    dst: dataset/ruler2/prepare.py
+  - src: nemo_skills/dataset/ruler2/prepare_niah.py
+    dst: dataset/ruler2/prepare_niah.py
+  - src: nemo_skills/dataset/ruler2/prepare_qa.py
+    dst: dataset/ruler2/prepare_qa.py
+  - src: nemo_skills/dataset/ruler2/prepare_mmlu.py
+    dst: dataset/ruler2/prepare_mmlu.py
+  - src: nemo_skills/dataset/ruler2/tokenizer.py
+    dst: dataset/ruler2/tokenizer.py
+    # GeminiTokenizer is the only module-level `tenacity` user and needs a
+    # GEMINI_API_KEY. sgl-eval restricts tokenizer_type to hf/openai.
+    drop_functions:
+      - GeminiTokenizer
+    drop_imports:
+      - tenacity
+  - src: nemo_skills/dataset/ruler2/ruler2_score.py
+    dst: dataset/ruler2/ruler2_score.py
+
   # --- prompt templates ---
   - src: nemo_skills/prompt/config/generic/math.yaml
     dst: prompts/math.yaml
@@ -103,6 +149,10 @@ files:
     dst: prompts/mcq-4choices.yaml
   - src: nemo_skills/prompt/config/eval/aai/mcq-4choices-boxed.yaml
     dst: prompts/mcq-4choices-boxed.yaml
+  # RULER2's ++prompt_config. Pure passthrough (`user: "{question}"`) -- the
+  # long context is already assembled by the prepare scripts.
+  - src: nemo_skills/prompt/config/generic/default.yaml
+    dst: prompts/default.yaml
 
   # --- upstream's own behavior tests ---
   # Run as part of `pytest`. These are NS's canonical regression cases,

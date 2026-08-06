@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List
 
+from sgl_eval.predictions import PredSchema
 from sgl_eval.types import GenConfig, RunResult
 
 EvalRunFn = Callable[..., RunResult]
@@ -21,6 +22,12 @@ class EvalSpec:
     default_gen: GenConfig
     default_n_repeats: int
     run: EvalRunFn
+    # Concurrency the benchmark is safe at by default. The runner limits by
+    # request count, not token budget, so a long-context benchmark has to ask
+    # for a lower ceiling than the 64 that suits short prompts.
+    default_num_threads: int = 64
+    # How a scored sample is written to output-rs*.jsonl.
+    pred_schema: PredSchema = field(default_factory=PredSchema)
 
 
 _REGISTRY: Dict[str, EvalSpec] = {}

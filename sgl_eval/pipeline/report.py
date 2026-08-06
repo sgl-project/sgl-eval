@@ -69,7 +69,7 @@ def render(result: RunResult, ctx: RunContext) -> int:
 
 
 def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
-    return {
+    meta: Dict[str, Any] = {
         "timestamp": ctx.stamp,
         "model": ctx.sampler.model,
         "base_url": ctx.inputs.base_url,
@@ -78,6 +78,11 @@ def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
         "sgl_eval_version": _SGL_EVAL_VERSION,
         "ns_commit_sha": _read_ns_commit_sha(),
     }
+    # Benchmarks whose dataset is generated (ruler2) are only identified by
+    # these -- without them a metrics.json cannot say which setup it scored.
+    if ctx.bench_args:
+        meta["bench_args"] = dict(ctx.bench_args)
+    return meta
 
 
 def _read_ns_commit_sha() -> Optional[str]:

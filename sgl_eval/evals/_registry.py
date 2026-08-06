@@ -11,6 +11,8 @@ no new module. Each entry encodes only the things that genuinely differ:
   by default. True for reasoning benchmarks (aime / gpqa); off otherwise.
 - ``default_n_repeats``: per-example repeat count (sgl-eval choice; NS
   also leaves this to CLI via ``--benchmarks=name:N``).
+- ``default_num_threads``: concurrency ceiling, defaulting to 64. Long-context
+  benchmarks must lower it -- the runner limits requests, not tokens.
 - ``description``: human-readable one-liner.
 
 Sampling params (``temperature`` / ``top_p`` / ``max_tokens``) are **not**
@@ -23,7 +25,9 @@ single value here would encode a model-specific assumption.
 ``metrics_type`` and the prompt yaml basename are derived at registration
 time from the vendored ``dataset/<name>/__init__.py`` (``METRICS_TYPE`` +
 ``GENERATION_ARGS``), so we never hand-mirror upstream's per-benchmark
-choices.
+choices. Two rows opt out by declaring both explicitly: ``mmmu_pro`` (no
+upstream module) and ``ruler2`` (upstream ships no dataset metadata -- its
+subtasks only exist once generated).
 """
 
 from __future__ import annotations
@@ -37,6 +41,9 @@ from sgl_eval.evals._math import run_math_benchmark
 from sgl_eval.evals._mmmu_pro import load_mmmu_pro
 from sgl_eval.evals._multichoice import run_multichoice_benchmark
 from sgl_eval.evals._prompts import vendored_prompt
+from sgl_eval.evals._ruler2 import PRED_SCHEMA as _RULER2_PRED_SCHEMA
+from sgl_eval.evals._ruler2 import run_ruler2_benchmark
+from sgl_eval.predictions import PredSchema
 from sgl_eval.registry import EvalSpec, register
 from sgl_eval.types import GenConfig
 
@@ -100,6 +107,22 @@ _TABLE = [
         "default_n_repeats": 1,
         "description": "MMMU-Pro (multimodal, 10-choice, vision-dependent).",
     },
+    {
+        # Group benchmark: 12 subtasks scored separately, then averaged by
+        # vendored ruler2_score.compute_score. Its dataset is generated per
+        # (tokenizer, seq length), so it needs --bench-arg seq_len=N and has
+        # no upstream dataset/__init__.py metadata to derive from.
+        "name": "ruler2",
+        "metrics_type": "ruler2",
+        "prompt": "default",
+        "loader_fn": None,
+        "thinking": False,
+        "default_n_repeats": 1,
+        # 64 concurrent 128k prompts is ~8M tokens in flight; the runner caps
+        # request count, not tokens.
+        "default_num_threads": 4,
+        "description": "RULER2 synthetic long-context, 12 subtasks (needs --bench-arg seq_len=N).",
+    },
 ]
 
 
@@ -153,6 +176,32 @@ def _build_loader(entry: dict):
 
 
 def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Callable):
+    if metrics_type == "ruler2":
+
+        def run(
+            *,
+            sampler,
+            gen,
+            n_repeats,
+            num_examples,
+            num_threads,
+            predictions_writer=None,
+            load_examples=None,
+            bench_args=None,
+        ):
+            return run_ruler2_benchmark(
+                name=name,
+                sampler=sampler,
+                gen=gen,
+                n_repeats=n_repeats,
+                num_examples=num_examples,
+                num_threads=num_threads,
+                predictions_writer=predictions_writer,
+                load_examples=load_examples,
+                bench_args=bench_args,
+            )
+
+        return run
     if metrics_type == "math":
 
         def run(
@@ -164,6 +213,7 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
             num_threads,
             predictions_writer=None,
             load_examples=None,
+            bench_args=None,
         ):
             return run_math_benchmark(
                 name=name,
@@ -189,6 +239,7 @@ def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Calla
             num_threads,
             predictions_writer=None,
             load_examples=None,
+            bench_args=None,
         ):
             return run_multichoice_benchmark(
                 name=name,
@@ -223,5 +274,7 @@ for _entry in _TABLE:
             default_gen=_build_default_gen(_entry["thinking"]),
             default_n_repeats=_entry["default_n_repeats"],
             run=_run,
+            default_num_threads=_entry.get("default_num_threads", 64),
+            pred_schema=(_RULER2_PRED_SCHEMA if _metrics_type == "ruler2" else PredSchema()),
         )
     )
