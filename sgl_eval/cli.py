@@ -22,7 +22,11 @@ from sgl_eval.types import GenConfig
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+    args = build_parser().parse_args(argv if argv is not None else sys.argv[1:])
+    return args.func(args)
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sgl-eval")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -94,16 +98,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="path to NS-shape jsonl ({id?, problem, expected_answer}); "
         "replaces the vendored dataset for this run",
     )
-    p_run.add_argument(
-        "--bench-arg",
-        action="append",
-        default=[],
-        metavar="KEY=VALUE",
-        help="benchmark-specific option, repeatable. ruler2: seq_len=N (required), "
-        "tokenizer=<hf-id|path>, tokenizer_type=hf|openai, dataset_size=N, "
-        "tasks=a,b,c",
-    )
     p_run.set_defaults(func=cmd_run, dump_predictions=True)
+
+    # Benchmarks contribute their own options, so argparse -- not a hand-rolled
+    # KEY=VALUE parser -- owns their types, choices and --help text.
+    for spec in list_evals():
+        if spec.add_arguments is not None:
+            spec.add_arguments(p_run.add_argument_group(f"{spec.name} options"))
 
     p_refresh = sub.add_parser(
         "refresh",
@@ -116,9 +117,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_refresh.set_defaults(func=cmd_refresh)
 
     register_preset_subcommand(sub)
-
-    args = parser.parse_args(argv)
-    return args.func(args)
+    return parser
 
 
 def _add_endpoint_args(p: argparse.ArgumentParser, *, base_url_required: bool = True) -> None:
@@ -149,6 +148,8 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"  temperature : {gen.temperature}")
             print(f"  top_p       : {gen.top_p}")
             print(f"  max_tokens  : {gen.max_tokens}")
+            print(f"  min_p       : {gen.min_p}")
+            print(f"  rep_penalty : {gen.repetition_penalty}")
         return 0
     width = max(len(s.name) for s in specs)
     for s in specs:

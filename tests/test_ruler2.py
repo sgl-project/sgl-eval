@@ -309,40 +309,84 @@ def test_setup_slug_separates_every_generation_input():
     assert "/" not in base.setup_slug
 
 
+def _parse_run(*extra: str):
+    """Parse a ``sgl-eval run ruler2`` invocation the way the CLI would."""
+    from sgl_eval.cli import build_parser
+
+    return build_parser().parse_args(["run", "ruler2", "--base-url", "http://x/v1", *extra])
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--ruler2-tokenizer-type", "gemini"],  # dropped from the vendored slice
+        ["--ruler2-tasks", "bogus"],
+        ["--ruler2-seq-len", "0"],
+        ["--ruler2-seq-len", "not-a-number"],
+        ["--ruler2-headroom", "512"],  # removed knob: it shrank the dataset
+        ["--bench-arg", "seq_len=131072"],  # retired KEY=VALUE channel
+    ],
+)
+def test_argparse_rejects_bad_ruler2_options(flags):
+    """These used to be hand-rolled checks inside ``from_bench_args``. argparse
+    owns them now -- including the two flags that must stay gone."""
+    with pytest.raises(SystemExit):
+        _parse_run(*flags)
+
+
+def test_parsed_ruler2_options_are_already_typed():
+    args = _parse_run("--ruler2-seq-len", "131072", "--ruler2-tasks", "qa_basic", "qa_easy")
+    assert args.ruler2_seq_len == 131072
+    assert args.ruler2_tasks == ["qa_basic", "qa_easy"]
+    assert args.ruler2_dataset_size == 100
+
+
+def test_collect_bench_args_strips_the_prefix():
+    """``metrics.json`` records these, so only options actually chosen belong in
+    the dict -- an unset tokenizer must not show up as null."""
+    from sgl_eval.pipeline.setup import _collect_bench_args
+
+    args = _parse_run("--ruler2-seq-len", "131072", "--ruler2-tasks", "qa_basic")
+    assert _collect_bench_args(args, "ruler2") == {
+        "seq_len": 131072,
+        "tokenizer_type": "hf",
+        "dataset_size": 100,
+        "tasks": ["qa_basic"],
+    }
+
+
 def test_from_bench_args_requires_seq_len():
     with pytest.raises(SystemExit):
         Ruler2Config.from_bench_args({}, model="m")
 
 
 def test_from_bench_args_defaults_tokenizer_to_model():
-    cfg = Ruler2Config.from_bench_args({"seq_len": "8192"}, model="Qwen/Qwen3-8B")
+    cfg = Ruler2Config.from_bench_args({"seq_len": 8192}, model="Qwen/Qwen3-8B")
     assert cfg.tokenizer_path == "Qwen/Qwen3-8B"
     assert cfg.tasks == ALL_TASKS
 
 
-def test_from_bench_args_rejects_unknown_keys():
-    with pytest.raises(SystemExit):
-        Ruler2Config.from_bench_args({"seq_len": "8192", "nope": "1"}, model="m")
+def test_generation_stages_through_a_partial_dir(tmp_path, monkeypatch):
+    """A kill mid-write must not leave a truncated test.jsonl that later runs
+    accept as complete, so generation lands in ``<task>.partial`` and renames."""
+    import sgl_eval.evals._ruler2 as mod
 
+    monkeypatch.setattr(mod, "_CACHE_ROOT", tmp_path)
+    cfg = Ruler2Config(max_seq_length=4096, tokenizer_path="t")
+    seen = {}
 
-def test_from_bench_args_rejects_unknown_task():
-    with pytest.raises(SystemExit):
-        Ruler2Config.from_bench_args({"seq_len": "8192", "tasks": "qa_basic,bogus"}, model="m")
+    def fake_prepare(out_folder, *_args):
+        seen["folder"] = out_folder
+        Path(out_folder).mkdir(parents=True, exist_ok=True)
+        (Path(out_folder) / "test.jsonl").write_text(
+            json.dumps({"index": 0, "question": "q", "expected_answer": ["a"]}) + "\n"
+        )
 
-
-def test_from_bench_args_rejects_gemini_tokenizer():
-    """``GeminiTokenizer`` is dropped from the vendored slice, so selecting it
-    would NameError deep inside generation."""
-    with pytest.raises(SystemExit):
-        Ruler2Config.from_bench_args({"seq_len": "8192", "tokenizer_type": "gemini"}, model="m")
-
-
-def test_from_bench_args_rejects_headroom_knob():
-    """``headroom`` was removed on purpose: it shrank the dataset and made our
-    scores incomparable with NeMo-Skills. Rejecting it loudly beats silently
-    ignoring a flag someone copied from an older invocation."""
-    with pytest.raises(SystemExit):
-        Ruler2Config.from_bench_args({"seq_len": "8192", "headroom": "512"}, model="m")
+    monkeypatch.setattr(mod._prepare, "prepare_qa_basic", fake_prepare)
+    out = mod._ensure_task_data(cfg, "qa_basic")
+    assert seen["folder"].endswith("qa_basic.partial")
+    assert out == cfg.cache_dir / "qa_basic" / "test.jsonl" and out.exists()
+    assert not (cfg.cache_dir / "qa_basic.partial").exists()
 
 
 # --- preflight ------------------------------------------------------------

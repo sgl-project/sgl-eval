@@ -130,7 +130,7 @@ ways worth knowing before the first run:
 pip install 'sgl-eval[longcontext]'      # transformers, nltk, wonderwords, inflect
 
 sgl-eval run ruler2 --base-url http://localhost:30000/v1 \
-  --bench-arg seq_len=131072
+  --ruler2-seq-len 131072
 ```
 
 **1. The dataset is generated, not downloaded.** It is bound to a tokenizer and
@@ -138,19 +138,20 @@ a target length, so the cache key is `(tokenizer, seq_len, dataset_size)` under
 `~/.cache/sgl_eval/ruler2/<setup>/`. First build of a 128k setup takes tens of
 minutes and lands ~600 MB; later runs reuse it.
 
-| `--bench-arg` | default | meaning |
+| flag | default | meaning |
 |---|---|---|
-| `seq_len` | **required** | target context length; no default because the data is per-length |
-| `tokenizer` | the served model id | HF repo id or local path used to size samples |
-| `tokenizer_type` | `hf` | `hf` or `openai` (tiktoken) |
-| `dataset_size` | `100` | samples per subtask |
-| `tasks` | all 12 | comma-separated subset; scores a flagged partial average |
+| `--ruler2-seq-len` | **required** | target context length; no default because the data is per-length |
+| `--ruler2-tokenizer` | the served model id | HF repo id or local path used to size samples |
+| `--ruler2-tokenizer-type` | `hf` | `hf` or `openai` (tiktoken) |
+| `--ruler2-dataset-size` | `100` | samples per subtask |
+| `--ruler2-tasks` | all 12 | space-separated subset; scores a flagged partial average |
 
-These go straight to the vendored generator, whose own `random_seed` is fixed
-at 42 -- so a given config reproduces NeMo-Skills' dataset byte for byte. There
-is deliberately **no knob that shrinks `seq_len`**: it defines the dataset and
-therefore the score, which puts it under the vendoring rule. `bench_args` is
-recorded in `metrics.json` so a result always names its setup.
+`sgl-eval run --help` lists them under `ruler2 options`. They go straight to the
+vendored generator, whose own `random_seed` is fixed at 42 -- so a given config
+reproduces NeMo-Skills' dataset byte for byte. There is deliberately **no knob
+that shrinks `seq_len`**: it defines the dataset and therefore the score, which
+puts it under the vendoring rule. The chosen values are recorded in
+`metrics.json` so a result always names its setup.
 
 **2. The window must hold prompt *plus* answer.** Prompts are sized with the
 raw tokenizer, but requests go through `/v1/chat/completions`, where the server
@@ -180,7 +181,7 @@ sgl-eval sends none unless asked, so add `--seed 0` for an exact match. It has
 no effect at `temperature=0`.
 
 Three values are yours to align, because they define the dataset rather than
-the request: pass the same `--bench-arg tokenizer=` NS was given (sgl-eval
+the request: pass the same `--ruler2-tokenizer` NS was given (sgl-eval
 otherwise defaults to the served model id), the same `seq_len` (the official
 RULER2 sweep picks it explicitly, e.g. `1048576 - 768` to reserve room to
 answer), and the same `dataset_size`. `--num-examples` is *not* a substitute for

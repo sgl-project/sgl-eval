@@ -127,7 +127,7 @@ def _build_rows(agg: Dict[str, float], k: int) -> List[Tuple[bool, str, str, Opt
 
     # Group benchmarks (ruler2) publish per-subtask scores as ``task.<name>``;
     # the headline averages them, so the breakdown says which one moved.
-    task_keys = sorted(k for k in agg if k.startswith("task."))
+    task_keys = sorted(key for key in agg if key.startswith("task."))
     if task_keys:
         if agg.get("partial_group"):
             rows.append((False, "group", "PARTIAL (task subset, not the full group)", None))

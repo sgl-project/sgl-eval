@@ -21,8 +21,10 @@ Pipeline mirror:
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -124,57 +126,71 @@ class Ruler2Config:
         return _CACHE_ROOT / self.setup_slug
 
     @classmethod
-    def from_bench_args(cls, bench_args: Optional[Dict[str, str]], *, model: str) -> "Ruler2Config":
+    def from_bench_args(cls, bench_args: Optional[Dict[str, Any]], *, model: str) -> "Ruler2Config":
+        """Values arrive already typed and range-checked by ``add_arguments``.
+        The one rule argparse cannot express is "required, but only when this
+        benchmark is the one being run"."""
         args = dict(bench_args or {})
-        raw_seq_len = args.pop("seq_len", None)
-        if raw_seq_len is None:
+        if args.get("seq_len") is None:
             sys.exit(
                 "error: ruler2 requires a target sequence length, e.g.\n"
-                "    --bench-arg seq_len=131072\n"
+                "    --ruler2-seq-len 131072\n"
                 "It has no default: the dataset is generated per length."
             )
-        # Defaults to the served model id, which is a HF repo id for most
-        # SGLang deployments; override for local paths or gated repos.
-        tokenizer_path = args.pop("tokenizer", model)
-        tokenizer_type = args.pop("tokenizer_type", "hf")
-        if tokenizer_type not in ("hf", "openai"):
-            sys.exit(
-                f"error: --bench-arg tokenizer_type={tokenizer_type!r} unsupported "
-                "(hf | openai; the vendored gemini tokenizer is dropped)."
-            )
-        dataset_size = _positive_int(args.pop("dataset_size", 100), "dataset_size")
-        raw_tasks = args.pop("tasks", None)
-        tasks = ALL_TASKS
-        if raw_tasks:
-            tasks = tuple(t.strip() for t in raw_tasks.split(",") if t.strip())
-            unknown = [t for t in tasks if t not in ALL_TASKS]
-            if unknown:
-                sys.exit(
-                    f"error: unknown ruler2 task(s) {unknown}. "
-                    f"Available: {', '.join(ALL_TASKS)}"
-                )
-        if args:
-            sys.exit(
-                f"error: unknown ruler2 --bench-arg key(s): {sorted(args)}. "
-                "Known: seq_len, tokenizer, tokenizer_type, dataset_size, tasks"
-            )
         return cls(
-            max_seq_length=_positive_int(raw_seq_len, "seq_len"),
-            tokenizer_path=tokenizer_path,
-            tokenizer_type=tokenizer_type,
-            dataset_size=dataset_size,
-            tasks=tasks,
+            max_seq_length=args["seq_len"],
+            # The served model id is a HF repo id for most SGLang deployments;
+            # override for local paths or gated repos.
+            tokenizer_path=args.get("tokenizer") or model,
+            tokenizer_type=args.get("tokenizer_type") or "hf",
+            dataset_size=args.get("dataset_size") or 100,
+            tasks=tuple(args["tasks"]) if args.get("tasks") else ALL_TASKS,
         )
 
 
-def _positive_int(raw: Any, label: str) -> int:
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        sys.exit(f"error: --bench-arg {label}={raw!r} is not an integer")
+def _positive_int(raw: str) -> int:
+    """argparse ``type``: rejects 0 and negatives at parse time."""
+    value = int(raw)
     if value <= 0:
-        sys.exit(f"error: --bench-arg {label}={value} must be positive")
+        raise argparse.ArgumentTypeError(f"must be positive, got {value}")
     return value
+
+
+def add_arguments(group: Any) -> None:
+    """ruler2's own CLI surface. Wired via ``EvalSpec.add_arguments``, so
+    ``sgl-eval run --help`` documents these and argparse rejects a bad value
+    before a run starts."""
+    group.add_argument(
+        "--ruler2-seq-len",
+        type=_positive_int,
+        metavar="N",
+        help="target context length; required, as the dataset is generated per length",
+    )
+    group.add_argument(
+        "--ruler2-tokenizer",
+        metavar="HF_ID_OR_PATH",
+        help="tokenizer used to size samples (default: the served model id)",
+    )
+    group.add_argument(
+        "--ruler2-tokenizer-type",
+        choices=("hf", "openai"),
+        default="hf",
+        help="the vendored gemini tokenizer is dropped, so it is not offered",
+    )
+    group.add_argument(
+        "--ruler2-dataset-size",
+        type=_positive_int,
+        default=100,
+        metavar="N",
+        help="samples per subtask (default: 100)",
+    )
+    group.add_argument(
+        "--ruler2-tasks",
+        nargs="+",
+        choices=ALL_TASKS,
+        metavar="TASK",
+        help=f"subset of the 12 subtasks, scored as a flagged partial average ({', '.join(ALL_TASKS)})",
+    )
 
 
 def _grader_for(cfg: Ruler2Config, task: str) -> Tuple[str, str]:
@@ -202,7 +218,11 @@ def _ensure_task_data(cfg: Ruler2Config, task: str) -> Path:
     out_path = task_dir / "test.jsonl"
     if out_path.exists():
         return out_path
-    task_dir.mkdir(parents=True, exist_ok=True)
+    # Generate into a staging dir and rename, so a kill mid-write cannot leave a
+    # truncated test.jsonl that later runs would accept as a complete dataset.
+    staging = cfg.cache_dir / f"{task}.partial"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True, exist_ok=True)
     prepare_fn: Callable[..., None] = getattr(_prepare, f"prepare_{task}")
     print(
         f"  generating ruler2/{task} at {cfg.max_seq_length} tokens "
@@ -211,7 +231,7 @@ def _ensure_task_data(cfg: Ruler2Config, task: str) -> Path:
     )
     try:
         prepare_fn(
-            str(task_dir),
+            str(staging),
             cfg.tokenizer_type,
             cfg.tokenizer_path,
             cfg.max_seq_length,
@@ -221,8 +241,12 @@ def _ensure_task_data(cfg: Ruler2Config, task: str) -> Path:
         sys.exit(
             f"error: ruler2 {task} generation failed (exit {e.returncode}).\n{_MISSING_DEPS_HINT}"
         )
-    if not out_path.exists():
-        sys.exit(f"error: ruler2 {task} generation produced no {out_path}")
+    staged = staging / "test.jsonl"
+    if not staged.exists():
+        sys.exit(f"error: ruler2 {task} generation produced no {staged}")
+    task_dir.mkdir(parents=True, exist_ok=True)
+    staged.replace(out_path)
+    shutil.rmtree(staging, ignore_errors=True)
     return out_path
 
 
@@ -400,7 +424,7 @@ def _preflight_context_length(
                 f"Every request would 400 or have no room to answer, scoring 0 "
                 f"with a successful exit code.\n"
                 f"Fix: serve with a larger --context-length, or lower "
-                f"--bench-arg seq_len (RULER2 is meant to be swept over "
+                f"--ruler2-seq-len (RULER2 is meant to be swept over "
                 f"lengths below the window)."
             )
         print(f"Preflight: endpoint {key}={limit} >= {needed} (seq_len + gen budget)")
@@ -424,12 +448,12 @@ def run_ruler2_benchmark(
     num_threads: int,
     predictions_writer: Optional[PredictionsWriter] = None,
     load_examples: Optional[Callable[[Optional[int]], List[Example]]] = None,
-    bench_args: Optional[Dict[str, str]] = None,
+    bench_args: Optional[Dict[str, Any]] = None,
 ) -> RunResult:
     if load_examples is not None:
         sys.exit(
             "error: --from-dataset is not supported for ruler2; it is a group of "
-            "12 generated subtasks. Point --bench-arg tokenizer/seq_len instead."
+            "12 generated subtasks. Point --ruler2-tokenizer / --ruler2-seq-len instead."
         )
     cfg = Ruler2Config.from_bench_args(bench_args, model=sampler.model)
     _preflight_context_length(sampler, cfg, gen)

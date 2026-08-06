@@ -33,7 +33,7 @@ class RunContext:
     num_threads: int
     args: argparse.Namespace
     load_examples: Optional[Callable[[Optional[int]], List[Example]]]
-    bench_args: Dict[str, str]
+    bench_args: Dict[str, Any]
     _prev_sigint_handler: Any
 
 
@@ -71,19 +71,21 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
         num_threads=num_threads,
         args=args,
         load_examples=load_examples,
-        bench_args=_parse_bench_args(getattr(args, "bench_arg", []) or []),
+        bench_args=_collect_bench_args(args, spec.name),
         _prev_sigint_handler=prev_sigint,
     )
 
 
-def _parse_bench_args(pairs: List[str]) -> Dict[str, str]:
-    parsed: Dict[str, str] = {}
-    for item in pairs:
-        if "=" not in item:
-            sys.exit(f"error: --bench-arg expects KEY=VALUE, got {item!r}")
-        key, value = item.split("=", 1)
-        parsed[key.strip()] = value.strip()
-    return parsed
+def _collect_bench_args(args: argparse.Namespace, name: str) -> Dict[str, Any]:
+    """Gather the running benchmark's own ``--<name>-*`` options, prefix
+    stripped. Feeds the run fn and ``metrics.json`` provenance -- a generated
+    dataset is identified by nothing else."""
+    prefix = f"{name}_"
+    return {
+        key[len(prefix) :]: value
+        for key, value in vars(args).items()
+        if key.startswith(prefix) and value is not None
+    }
 
 
 def teardown(ctx: RunContext) -> None:

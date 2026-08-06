@@ -42,6 +42,7 @@ from sgl_eval.evals._mmmu_pro import load_mmmu_pro
 from sgl_eval.evals._multichoice import run_multichoice_benchmark
 from sgl_eval.evals._prompts import vendored_prompt
 from sgl_eval.evals._ruler2 import PRED_SCHEMA as _RULER2_PRED_SCHEMA
+from sgl_eval.evals._ruler2 import add_arguments as _add_ruler2_arguments
 from sgl_eval.evals._ruler2 import run_ruler2_benchmark
 from sgl_eval.predictions import PredSchema
 from sgl_eval.registry import EvalSpec, register
@@ -110,7 +111,7 @@ _TABLE = [
     {
         # Group benchmark: 12 subtasks scored separately, then averaged by
         # vendored ruler2_score.compute_score. Its dataset is generated per
-        # (tokenizer, seq length), so it needs --bench-arg seq_len=N and has
+        # (tokenizer, seq length), so it needs --ruler2-seq-len N and has
         # no upstream dataset/__init__.py metadata to derive from.
         "name": "ruler2",
         "metrics_type": "ruler2",
@@ -121,7 +122,7 @@ _TABLE = [
         # 64 concurrent 128k prompts is ~8M tokens in flight; the runner caps
         # request count, not tokens.
         "default_num_threads": 4,
-        "description": "RULER2 synthetic long-context, 12 subtasks (needs --bench-arg seq_len=N).",
+        "description": "RULER2 synthetic long-context, 12 subtasks (needs --ruler2-seq-len N).",
     },
 ]
 
@@ -276,5 +277,6 @@ for _entry in _TABLE:
             run=_run,
             default_num_threads=_entry.get("default_num_threads", 64),
             pred_schema=(_RULER2_PRED_SCHEMA if _metrics_type == "ruler2" else PredSchema()),
+            add_arguments=(_add_ruler2_arguments if _metrics_type == "ruler2" else None),
         )
     )
