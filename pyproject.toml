@@ -50,6 +50,8 @@ dependencies = [
     "datasets>=2.14,<5",
     # Multimodal benchmarks (MMMU-Pro question image -> PNG bytes)
     "pillow>=10,<12",
+    # RULER2 grader (vendored evaluator/ruler.py imports this at module level)
+    "editdistance>=0.6,<1",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +60,15 @@ dev = [
     "pytest-asyncio>=0.23,<2",
     "ruff>=0.5,<1",
     "black>=24.0,<26",
+]
+# RULER2 dataset generation. Only needed to BUILD the dataset -- scoring an
+# already-generated one needs core only. `transformers` is heavy and nothing
+# else in sgl-eval wants it, so it stays out of the default install.
+longcontext = [
+    "transformers>=4.40,<6",
+    "nltk>=3.8,<4",
+    "wonderwords>=2.2,<3",
+    "inflect>=7.0,<8",
 ]
 
 [project.scripts]

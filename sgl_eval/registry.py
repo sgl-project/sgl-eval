@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
-from dataclasses import dataclass
-from typing import Callable, Dict, List
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
 
-from sgl_eval.types import GenConfig, RunResult
+from sgl_eval.predictions import PredSchema
+from sgl_eval.types import ExampleResult, GenConfig, RunResult
 
 EvalRunFn = Callable[..., RunResult]
+# ``sgl-eval refresh`` hook: rebuild the aggregate from dumped predictions.
+# Returning ``None`` means the sample-level mean is already correct.
+AggregateFromPredictions = Callable[[List[ExampleResult], int], Optional[Dict[str, float]]]
 
 
 @dataclass
@@ -21,6 +25,19 @@ class EvalSpec:
     default_gen: GenConfig
     default_n_repeats: int
     run: EvalRunFn
+    # Concurrency the benchmark is safe at by default. The runner limits by
+    # request count, not token budget, so a long-context benchmark has to ask
+    # for a lower ceiling than the 64 that suits short prompts.
+    default_num_threads: int = 64
+    # How a scored sample is written to output-rs*.jsonl.
+    pred_schema: PredSchema = field(default_factory=PredSchema)
+    # Lets a benchmark add its own options to ``sgl-eval run``, so argparse owns
+    # their types, choices and --help instead of a stringly-typed side channel.
+    # Names must be prefixed ``--<benchmark>-*``; ``prepare_run`` collects them.
+    add_arguments: Optional[Callable[[Any], None]] = None
+    # Lets refresh rebuild pass@k / group headlines without knowing which
+    # benchmark it is looking at.
+    aggregate_predictions: Optional[AggregateFromPredictions] = None
 
 
 _REGISTRY: Dict[str, EvalSpec] = {}
