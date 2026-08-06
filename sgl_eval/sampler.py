@@ -23,17 +23,29 @@ from sgl_eval.types import GenConfig, MessageList, Sample
 LOG = logging.getLogger(__name__)
 
 
-class _LargeHttpxClient(httpx.Client):
-    """httpx client tuned for long-running reasoning generations.
+# Pool ceiling, deliberately far above any plausible ``--num-threads`` (a
+# short-context sweep can run a few hundred). httpx defaults to 100, which would
+# cap concurrency below what the runner was told to use, silently.
+_MAX_CONNECTIONS = 3600
 
-    The 4h per-call ceiling matches upstream NeMo-Skills' ``InferenceConfig``
-    ``timeout`` so a long-context run cannot diverge from an NS run by timing
-    out where NS would still be waiting.
+
+class _LargeHttpxClient(httpx.Client):
+    """httpx client tuned for long-running generations -- a long context to
+    prefill, or a reasoning model emitting tens of thousands of tokens.
+
+    The 4h *read* ceiling matches upstream NeMo-Skills' ``InferenceConfig``
+    ``timeout``, so a run cannot diverge from an NS run by giving up where NS
+    would still be waiting. ``connect`` stays short on purpose: failing to
+    connect means nothing was generated, so it cannot move a score, while at
+    4h x ``max_retries`` an unreachable endpoint would tie up a worker for a
+    day and look like a hang rather than an error.
     """
 
     def __init__(self) -> None:
-        timeout = httpx.Timeout(14400)
-        limits = httpx.Limits(max_keepalive_connections=3600, max_connections=3600)
+        timeout = httpx.Timeout(14400, connect=30)
+        limits = httpx.Limits(
+            max_keepalive_connections=_MAX_CONNECTIONS, max_connections=_MAX_CONNECTIONS
+        )
         super().__init__(timeout=timeout, limits=limits)
 
 
@@ -137,8 +149,12 @@ class ChatCompletionSampler:
         # NS sends min_p / repetition_penalty on every request (also via
         # extra_body). Omit them and sglang resolves both from the served
         # model's generation_config.json, so an endpoint whose model ships a
-        # non-default value would decode differently here than under NS. Both
-        # are sglang / vLLM extensions, not OpenAI API params.
+        # non-default value would decode differently here than under NS.
+        # ``top_k`` deliberately stays out: NS only sends it when > 0 (its
+        # default is -1), so both sides leave it to the model's config.
+        # These are sglang / vLLM extensions rather than OpenAI API params, so a
+        # strict OpenAI endpoint 400s every request -- which surfaces as empty
+        # samples, i.e. a run scoring 0 with error_rate at 100%.
         extra_body: Dict[str, Any] = {
             "min_p": gen.min_p,
             "repetition_penalty": gen.repetition_penalty,
