@@ -189,7 +189,7 @@ def add_arguments(group: Any) -> None:
         nargs="+",
         choices=ALL_TASKS,
         metavar="TASK",
-        help=f"subset of the 12 subtasks, scored as a flagged partial average ({', '.join(ALL_TASKS)})",
+        help=f"subset of the 12 subtasks, headline is then flagged task_subset ({', '.join(ALL_TASKS)})",
     )
 
 
@@ -332,7 +332,7 @@ def _headline(per_task: Dict[str, Dict[str, Any]], k: int, *, namespace: str) ->
 
     The full-group average comes from vendored ``compute_score``, which raises on
     a missing task; anything short of 12 is averaged here and flagged
-    ``partial_group``. Gate on what completed, not what was requested -- a run
+    ``task_subset``. Gate on what completed, not what was requested -- a run
     aborted at task 5 needs the same fallback as ``tasks=a,b``.
     """
     agg_key = "pass@1" if k == 1 else f"pass@1[avg-of-{k}]"
@@ -347,35 +347,11 @@ def _headline(per_task: Dict[str, Dict[str, Any]], k: int, *, namespace: str) ->
     else:
         scores = [flat[f"task.{task}"] for task in per_task]
         flat["score"] = sum(scores) / len(scores) if scores else 0.0
-        flat["partial_group"] = 1.0
+        flat["task_subset"] = 1.0
 
     if k > 1:
         flat["pass@1"] = flat["score"]
     return flat
-
-
-def aggregate_from_predictions(
-    per_example: List[ExampleResult], n_repeats: int
-) -> Dict[str, float]:
-    """Rebuild the group headline from dumped predictions (``sgl-eval refresh``).
-
-    Subtask comes back from the id (``<task>-<index>``); no task name contains
-    ``-``. Every row carries the float ``is_correct`` whichever grader ran, so
-    all 12 re-aggregate through the ``ruler2`` branch -- for the multichoice
-    pair that is the same number, under the other key ``Ruler2Metrics`` takes.
-    """
-    by_task: Dict[str, List[ExampleResult]] = {}
-    for result in per_example:
-        by_task.setdefault(result.example.id.rsplit("-", 1)[0], []).append(result)
-
-    unknown = sorted(set(by_task) - set(ALL_TASKS))
-    if unknown:
-        sys.exit(
-            f"error: ruler2 predictions contain unrecognized subtask(s) {unknown}. "
-            "Expected ids shaped <task>-<index>; refusing to guess a headline."
-        )
-    per_task = {task: _task_metrics(rs, n_repeats, "ruler2") for task, rs in by_task.items()}
-    return _headline(per_task, n_repeats, namespace="ruler2")
 
 
 # Minimum room the endpoint must leave for the answer when ``max_tokens`` is

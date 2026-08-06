@@ -1,6 +1,6 @@
-"""``output-rs{rep}.jsonl`` is the canonical per-sample record. ``Writer``
-streams during a live run; ``Reader`` feeds replay (re-aggregate without
-re-sampling) and offline analysis (flaky / timeout). ``sample_to_pred``
+"""``output-rs{rep}.jsonl`` is the canonical per-sample record, streamed
+during a live run: the faithful log of what the model actually said, kept
+for offline analysis (flaky / timeout / eyeballing). ``sample_to_pred``
 mints the NS wire shape consumed by ``MathEvaluator.eval_single`` at
 sample time and ``MathMetrics.update`` at aggregate time."""
 
@@ -10,7 +10,7 @@ import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from sgl_eval.types import Example, Sample
 
@@ -103,41 +103,3 @@ class PredictionsWriter:
 
     def __exit__(self, *exc: Any) -> None:
         self.close()
-
-
-class PredictionsReader:
-    """Read back ``output-rs{rep}.jsonl`` from a run directory. Symmetric
-    to ``PredictionsWriter``; consumed by replay and offline analysis.
-    ``n_repeats`` is locked at construction time."""
-
-    def __init__(self, run_dir: Path, n_repeats: Optional[int] = None) -> None:
-        self.run_dir = Path(run_dir)
-        self.n_repeats = n_repeats if n_repeats is not None else self._detect_n_repeats()
-
-    def _detect_n_repeats(self) -> int:
-        # Max-index + 1, not file count: a partial run can be missing
-        # interior rs files, which would make a count under-report.
-        max_idx = -1
-        for path in self.run_dir.glob("output-rs*.jsonl"):
-            try:
-                idx = int(path.stem.removeprefix("output-rs"))
-            except ValueError:
-                continue
-            max_idx = max(max_idx, idx)
-        return max_idx + 1
-
-    def iter_rep(self, rep: int) -> Iterator[Dict[str, Any]]:
-        path = self.run_dir / f"output-rs{rep}.jsonl"
-        if not path.exists():
-            return
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
-
-    def iter_all(self) -> Iterator[Tuple[int, Dict[str, Any]]]:
-        """``(rep, pred)`` over every repeat, in rep-major order."""
-        for rep in range(self.n_repeats):
-            for pred in self.iter_rep(rep):
-                yield rep, pred

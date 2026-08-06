@@ -46,7 +46,7 @@ full payload as JSON under `--out-dir`. For example:
 ## Partial runs & subsetting
 
 A run doesn't have to cover the full dataset, finish to completion, or even
-use the vendored questions. Four mechanisms:
+use the vendored questions. Three mechanisms:
 
 ### Subsetting -- `--num-examples N`
 
@@ -65,16 +65,26 @@ A run can be stopped early without losing scored work:
   so far, writes `metrics.json` flagged `partial: true`, and exits `130`.
 - **Second `Ctrl-C`** -- hard-exit (escape hatch if cleanup hangs).
 
-A partial run reports a **sample-level score range** instead of a single
-number: missing samples are counted once as all-wrong (lower bound) and
-once as all-correct (upper bound), so the true score is guaranteed to lie
-inside. The preset `expected_vs_actual` comparison is skipped (a half-run
-isn't comparable to a baseline).
+Either way the per-sample record survives: every run streams predictions to
+`<out-dir>/sgl_eval_<name>_<stamp>/output-rs*.jsonl` as they are scored
+(disable with `--no-dump-predictions`).
+
+The score printed for a partial run is whatever the completed samples say --
+read it as a sanity signal, not a result. `metrics.json` records `partial:
+true` plus how much ran, so a half-run can't later be mistaken for a full one.
+The preset `expected_vs_actual` comparison is skipped (a half-run isn't
+comparable to a baseline).
 
 ```
-[partial] 240 / 480 samples completed (240 unfinished, n_repeats=16)
-[partial] examples: 12 full / 6 partial / 12 dropped (30 planned)
-[partial] score range: [39.17%, 89.17%] (missing samples assumed all-wrong / all-correct)
+[partial] 240 / 480 samples completed (of 30 examples x 16)
+[partial] expected_vs_actual skipped (partial runs aren't comparable to baselines).
+```
+
+The progress bar carries a live accuracy while the run is going, which is
+usually the point: watch it, decide, stop.
+
+```
+gsm8k:  34%|###4      | 452/1319 [02:11<04:12, 3.4it/s, acc=81.42%]
 ```
 
 ### Custom dataset -- `--from-dataset <path>`
@@ -85,20 +95,6 @@ questions change -- scoring still goes through the vendored grader.
 
 ```bash
 sgl-eval run aime25 --base-url http://localhost:30000/v1 --from-dataset ./my_problems.jsonl
-```
-
-### Offline recompute -- `refresh`
-
-Every run streams per-sample predictions to
-`<out-dir>/sgl_eval_<name>_<stamp>/output-rs*.jsonl` (disable with
-`--no-dump-predictions`). `refresh` rebuilds `metrics.json` from those
-files -- re-aggregating (pass@k / majority@k / token tally / partial
-counts / score bounds) without re-sampling, and preserving provenance
-(`model` / `base_url` / `ns_commit_sha` / `preset` / ...). It makes no
-requests; a partial run refreshes into the same score range.
-
-```bash
-sgl-eval refresh ~/.sgl_eval/sgl_eval_aime25_<stamp>/
 ```
 
 ---
@@ -144,7 +140,7 @@ minutes and lands ~600 MB; later runs reuse it.
 | `--ruler2-tokenizer` | the served model id | HF repo id or local path used to size samples |
 | `--ruler2-tokenizer-type` | `hf` | `hf` or `openai` (tiktoken) |
 | `--ruler2-dataset-size` | `100` | samples per subtask |
-| `--ruler2-tasks` | all 12 | space-separated subset; scores a flagged partial average |
+| `--ruler2-tasks` | all 12 | space-separated subset; headline is flagged `task_subset` |
 
 `sgl-eval run --help` lists them under `ruler2 options`. They go straight to the
 vendored generator, whose own `random_seed` is fixed at 42 -- so a given config

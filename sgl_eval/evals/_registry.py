@@ -37,15 +37,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Tuple
 
 from sgl_eval.evals._loader import load_bundled, load_via_prepare
-from sgl_eval.evals._math import aggregate_from_predictions as _math_aggregate
 from sgl_eval.evals._math import run_math_benchmark
 from sgl_eval.evals._mmmu_pro import load_mmmu_pro
-from sgl_eval.evals._multichoice import aggregate_from_predictions as _mcq_aggregate
 from sgl_eval.evals._multichoice import run_multichoice_benchmark
 from sgl_eval.evals._prompts import vendored_prompt
 from sgl_eval.evals._ruler2 import PRED_SCHEMA as _RULER2_PRED_SCHEMA
 from sgl_eval.evals._ruler2 import add_arguments as _add_ruler2_arguments
-from sgl_eval.evals._ruler2 import aggregate_from_predictions as _ruler2_aggregate
 from sgl_eval.evals._ruler2 import run_ruler2_benchmark
 from sgl_eval.predictions import PredSchema
 from sgl_eval.registry import EvalSpec, register
@@ -265,11 +262,10 @@ def _ruler2_run(name: str, _prompt_basename: str, _loader: Callable):
 
 
 _CATEGORIES: Dict[str, Dict[str, Any]] = {
-    "math": {"make_run": _math_run, "aggregate_predictions": _math_aggregate},
-    "multichoice": {"make_run": _mcq_run, "aggregate_predictions": _mcq_aggregate},
+    "math": {"make_run": _math_run},
+    "multichoice": {"make_run": _mcq_run},
     "ruler2": {
         "make_run": _ruler2_run,
-        "aggregate_predictions": _ruler2_aggregate,
         "pred_schema": _RULER2_PRED_SCHEMA,
         "add_arguments": _add_ruler2_arguments,
     },
@@ -297,6 +293,5 @@ for _entry in _TABLE:
             default_num_threads=_entry.get("default_num_threads", 64),
             pred_schema=_category.get("pred_schema") or PredSchema(),
             add_arguments=_category.get("add_arguments"),
-            aggregate_predictions=_category.get("aggregate_predictions"),
         )
     )
