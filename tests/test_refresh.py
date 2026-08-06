@@ -134,3 +134,29 @@ def test_refresh_partial_emits_score_bounds(tmp_path: Path) -> None:
     # 1 correct of 3 planned -> worst 1/3, best (1+2)/3 = 1.0
     assert payload["score_lower_bound"] == pytest.approx(1 / 3)
     assert payload["score_upper_bound"] == pytest.approx(1.0)
+
+
+def test_refresh_rebuilds_pass_at_k_through_the_spec_hook(tmp_path: Path) -> None:
+    """k > 1 has to go through the benchmark's own rebuild (``MathMetrics``),
+    not the sample-level mean -- otherwise pass@k / majority@k vanish on
+    refresh. Refresh itself knows nothing about which benchmark this is."""
+    run_dir = tmp_path / "sgl_eval_aime24_20260502-120000"
+    run_dir.mkdir()
+    _write_jsonl(run_dir / "output-rs0.jsonl", [_row("aime24-0", True), _row("aime24-1", False)])
+    _write_jsonl(run_dir / "output-rs1.jsonl", [_row("aime24-0", False), _row("aime24-1", False)])
+
+    assert cmd_refresh(SimpleNamespace(run_dir=str(run_dir))) == 0
+
+    agg = json.loads((run_dir / "metrics.json").read_text())["aggregate"]
+    assert "pass@1" in agg and "pass@2" in agg
+    assert agg["pass@1"] == pytest.approx(0.25)  # 1 of 4 samples correct
+    assert agg["pass@2"] == pytest.approx(0.5)  # example 0 correct in one repeat
+
+
+def test_every_benchmark_can_rebuild_its_aggregate() -> None:
+    """A new category must not land without a refresh path: refresh dispatches
+    purely on this hook, so a missing one silently degrades to a plain mean."""
+    from sgl_eval.registry import list_evals
+
+    missing = [s.name for s in list_evals() if s.aggregate_predictions is None]
+    assert missing == []

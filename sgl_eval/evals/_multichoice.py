@@ -71,6 +71,17 @@ def make_score_one_fn() -> ScoreOneFn:
     return score_one
 
 
+def aggregate_from_predictions(
+    results: List[ExampleResult], n_repeats: int
+) -> Optional[Dict[str, float]]:
+    """``sgl-eval refresh`` hook. pass@k / majority@k only exist for
+    k > 1; at k == 1 the plain sample-level mean refresh already computes
+    is the right answer, so decline by returning ``None``."""
+    if n_repeats == 1:
+        return None
+    return aggregate_with_math_metrics(results, n_repeats)
+
+
 def aggregate_with_math_metrics(results: List[ExampleResult], n_repeats: int) -> Dict[str, float]:
     if not results:
         return {"score": 0.0}

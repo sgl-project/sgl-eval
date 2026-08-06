@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sgl_eval.metrics import dump_run, format_summary
 from sgl_eval.pipeline.report import _format_partial_summary, _partial_stats
 from sgl_eval.predictions import PredictionsReader, PredSchema
-from sgl_eval.registry import get
+from sgl_eval.registry import EvalSpec, get
 from sgl_eval.types import Example, ExampleResult, RunResult, Sample
 
 # dump_run sets these from ``RunResult``; must not appear in run_meta
@@ -67,7 +67,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
 
     per_example = _build_per_example(reader, spec.pred_schema)
     n_repeats = reader.n_repeats
-    aggregate = _aggregate(spec.category, per_example, n_repeats)
+    aggregate = _aggregate(spec, per_example, n_repeats)
 
     completed_samples = sum(len(r.samples) for r in per_example)
     planned_examples = _resolve_planned_examples(old_payload, per_example)
@@ -191,22 +191,16 @@ def _build_per_example(reader: PredictionsReader, schema: PredSchema) -> List[Ex
     ]
 
 
-def _aggregate(category: str, per_example: List[ExampleResult], n_repeats: int) -> Dict[str, float]:
-    # Needed at every k: the headline is a mean of per-subtask means, which the
-    # sample-level fallback below only matches when subtask counts are equal.
-    if category == "ruler2":
-        from sgl_eval.evals._ruler2 import aggregate_from_predictions
-
-        return aggregate_from_predictions(per_example, n_repeats)
-    if n_repeats > 1:
-        if category == "math":
-            from sgl_eval.evals._math import aggregate_with_math_metrics
-
-            return aggregate_with_math_metrics(per_example, n_repeats)
-        if category == "multichoice":
-            from sgl_eval.evals._multichoice import aggregate_with_math_metrics
-
-            return aggregate_with_math_metrics(per_example, n_repeats)
+def _aggregate(
+    spec: EvalSpec, per_example: List[ExampleResult], n_repeats: int
+) -> Dict[str, float]:
+    """A benchmark that needs more than a sample-level mean -- pass@k, or a
+    group headline built from per-subtask means -- supplies its own rebuild via
+    ``EvalSpec.aggregate_predictions``. ``None`` means the mean below is right."""
+    if spec.aggregate_predictions is not None:
+        rebuilt = spec.aggregate_predictions(per_example, n_repeats)
+        if rebuilt is not None:
+            return rebuilt
     if not per_example:
         return {"score": 0.0}
     means = [sum(r.scores) / len(r.scores) for r in per_example if r.scores]

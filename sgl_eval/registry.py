@@ -9,9 +9,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from sgl_eval.predictions import PredSchema
-from sgl_eval.types import GenConfig, RunResult
+from sgl_eval.types import ExampleResult, GenConfig, RunResult
 
 EvalRunFn = Callable[..., RunResult]
+# ``sgl-eval refresh`` hook: rebuild the aggregate from dumped predictions.
+# Returning ``None`` means the sample-level mean is already correct.
+AggregateFromPredictions = Callable[[List[ExampleResult], int], Optional[Dict[str, float]]]
 
 
 @dataclass
@@ -32,6 +35,9 @@ class EvalSpec:
     # their types, choices and --help instead of a stringly-typed side channel.
     # Names must be prefixed ``--<benchmark>-*``; ``prepare_run`` collects them.
     add_arguments: Optional[Callable[[Any], None]] = None
+    # Lets refresh rebuild pass@k / group headlines without knowing which
+    # benchmark it is looking at.
+    aggregate_predictions: Optional[AggregateFromPredictions] = None
 
 
 _REGISTRY: Dict[str, EvalSpec] = {}

@@ -34,15 +34,18 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 from sgl_eval.evals._loader import load_bundled, load_via_prepare
+from sgl_eval.evals._math import aggregate_from_predictions as _math_aggregate
 from sgl_eval.evals._math import run_math_benchmark
 from sgl_eval.evals._mmmu_pro import load_mmmu_pro
+from sgl_eval.evals._multichoice import aggregate_from_predictions as _mcq_aggregate
 from sgl_eval.evals._multichoice import run_multichoice_benchmark
 from sgl_eval.evals._prompts import vendored_prompt
 from sgl_eval.evals._ruler2 import PRED_SCHEMA as _RULER2_PRED_SCHEMA
 from sgl_eval.evals._ruler2 import add_arguments as _add_ruler2_arguments
+from sgl_eval.evals._ruler2 import aggregate_from_predictions as _ruler2_aggregate
 from sgl_eval.evals._ruler2 import run_ruler2_benchmark
 from sgl_eval.predictions import PredSchema
 from sgl_eval.registry import EvalSpec, register
@@ -176,86 +179,101 @@ def _build_loader(entry: dict):
     raise ValueError(f"unknown loader kind: {kind!r}")
 
 
-def _build_run(name: str, metrics_type: str, prompt_basename: str, loader: Callable):
-    if metrics_type == "ruler2":
+# Per-category behavior, in one place. Every factory takes the same arguments so
+# the registration loop below stays free of benchmark names; a new category is a
+# new row here plus its runner module.
+def _math_run(name: str, _prompt_basename: str, loader: Callable):
+    def run(
+        *,
+        sampler,
+        gen,
+        n_repeats,
+        num_examples,
+        num_threads,
+        predictions_writer=None,
+        load_examples=None,
+        bench_args=None,
+    ):
+        return run_math_benchmark(
+            name=name,
+            sampler=sampler,
+            gen=gen,
+            n_repeats=n_repeats,
+            num_examples=num_examples,
+            num_threads=num_threads,
+            load_examples=load_examples or loader,
+            predictions_writer=predictions_writer,
+        )
 
-        def run(
-            *,
-            sampler,
-            gen,
-            n_repeats,
-            num_examples,
-            num_threads,
-            predictions_writer=None,
-            load_examples=None,
-            bench_args=None,
-        ):
-            return run_ruler2_benchmark(
-                name=name,
-                sampler=sampler,
-                gen=gen,
-                n_repeats=n_repeats,
-                num_examples=num_examples,
-                num_threads=num_threads,
-                predictions_writer=predictions_writer,
-                load_examples=load_examples,
-                bench_args=bench_args,
-            )
+    return run
 
-        return run
-    if metrics_type == "math":
 
-        def run(
-            *,
-            sampler,
-            gen,
-            n_repeats,
-            num_examples,
-            num_threads,
-            predictions_writer=None,
-            load_examples=None,
-            bench_args=None,
-        ):
-            return run_math_benchmark(
-                name=name,
-                sampler=sampler,
-                gen=gen,
-                n_repeats=n_repeats,
-                num_examples=num_examples,
-                num_threads=num_threads,
-                load_examples=load_examples or loader,
-                predictions_writer=predictions_writer,
-            )
+def _mcq_run(name: str, prompt_basename: str, loader: Callable):
+    prompt_yaml = _resolve_prompt(prompt_basename)
 
-        return run
-    if metrics_type == "multichoice":
-        prompt_yaml = _resolve_prompt(prompt_basename)
+    def run(
+        *,
+        sampler,
+        gen,
+        n_repeats,
+        num_examples,
+        num_threads,
+        predictions_writer=None,
+        load_examples=None,
+        bench_args=None,
+    ):
+        return run_multichoice_benchmark(
+            name=name,
+            sampler=sampler,
+            gen=gen,
+            n_repeats=n_repeats,
+            num_examples=num_examples,
+            num_threads=num_threads,
+            load_examples=load_examples or loader,
+            prompt_yaml=prompt_yaml,
+            predictions_writer=predictions_writer,
+        )
 
-        def run(
-            *,
-            sampler,
-            gen,
-            n_repeats,
-            num_examples,
-            num_threads,
-            predictions_writer=None,
-            load_examples=None,
-            bench_args=None,
-        ):
-            return run_multichoice_benchmark(
-                name=name,
-                sampler=sampler,
-                gen=gen,
-                n_repeats=n_repeats,
-                num_examples=num_examples,
-                num_threads=num_threads,
-                load_examples=load_examples or loader,
-                prompt_yaml=prompt_yaml,
-                predictions_writer=predictions_writer,
-            )
+    return run
 
-        return run
-    raise ValueError(f"unsupported upstream metrics_type: {metrics_type!r}")
+
+def _ruler2_run(name: str, _prompt_basename: str, _loader: Callable):
+    def run(
+        *,
+        sampler,
+        gen,
+        n_repeats,
+        num_examples,
+        num_threads,
+        predictions_writer=None,
+        load_examples=None,
+        bench_args=None,
+    ):
+        return run_ruler2_benchmark(
+            name=name,
+            sampler=sampler,
+            gen=gen,
+            n_repeats=n_repeats,
+            num_examples=num_examples,
+            num_threads=num_threads,
+            predictions_writer=predictions_writer,
+            load_examples=load_examples,
+            bench_args=bench_args,
+        )
+
+    return run
+
+
+_CATEGORIES: Dict[str, Dict[str, Any]] = {
+    "math": {"make_run": _math_run, "aggregate_predictions": _math_aggregate},
+    "multichoice": {"make_run": _mcq_run, "aggregate_predictions": _mcq_aggregate},
+    "ruler2": {
+        "make_run": _ruler2_run,
+        "aggregate_predictions": _ruler2_aggregate,
+        "pred_schema": _RULER2_PRED_SCHEMA,
+        "add_arguments": _add_ruler2_arguments,
+    },
+}
 
 
 for _entry in _TABLE:
@@ -265,8 +283,9 @@ for _entry in _TABLE:
         _prompt_basename = _entry["prompt"]
     else:
         _metrics_type, _prompt_basename = _resolve_upstream_metadata(_name)
-    _loader = _build_loader(_entry)
-    _run = _build_run(_name, _metrics_type, _prompt_basename, _loader)
+    if _metrics_type not in _CATEGORIES:
+        raise ValueError(f"unsupported metrics_type: {_metrics_type!r}")
+    _category = _CATEGORIES[_metrics_type]
     register(
         EvalSpec(
             name=_name,
@@ -274,9 +293,10 @@ for _entry in _TABLE:
             description=_entry["description"],
             default_gen=_build_default_gen(_entry["thinking"]),
             default_n_repeats=_entry["default_n_repeats"],
-            run=_run,
+            run=_category["make_run"](_name, _prompt_basename, _build_loader(_entry)),
             default_num_threads=_entry.get("default_num_threads", 64),
-            pred_schema=(_RULER2_PRED_SCHEMA if _metrics_type == "ruler2" else PredSchema()),
-            add_arguments=(_add_ruler2_arguments if _metrics_type == "ruler2" else None),
+            pred_schema=_category.get("pred_schema") or PredSchema(),
+            add_arguments=_category.get("add_arguments"),
+            aggregate_predictions=_category.get("aggregate_predictions"),
         )
     )
