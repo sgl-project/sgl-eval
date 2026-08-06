@@ -24,6 +24,8 @@ sampling:                          # all sub-fields optional
   top_p: 0.95
   max_tokens: null
   thinking: true                   # mapped to chat_template_kwargs.thinking
+  chat_template_kwargs:            # for templates reading another key
+    enable_thinking: false         # (Qwen3); merged over `thinking`
 
 expected:                          # optional, informational only
   score: 0.85                      # 0..1, headline metric (pass@1 for k>1,

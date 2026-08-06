@@ -71,6 +71,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="override chat_template_kwargs.thinking (per-benchmark default applies otherwise)",
     )
     p_run.add_argument(
+        "--chat-template-kwarg",
+        action="append",
+        metavar="K=V",
+        default=None,
+        help="extra chat_template_kwargs entry, repeatable. Values parse as JSON "
+        "when possible (e.g. enable_thinking=false), else stay strings. Use this "
+        "when the model's template reads a key other than 'thinking'.",
+    )
+    p_run.add_argument(
         "--out-dir",
         default="~/.sgl_eval",
         help="parent dir for run folders; each run writes into "
