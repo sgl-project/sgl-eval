@@ -58,6 +58,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_run.add_argument("--temperature", type=float, default=None)
     p_run.add_argument("--top-p", type=float, default=None)
     p_run.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="sampling seed sent to the server (unset by default; NeMo-Skills "
+        "sends 0, so pass --seed 0 to match its runs)",
+    )
+    p_run.add_argument(
         "--thinking",
         action=argparse.BooleanOptionalAction,
         default=None,

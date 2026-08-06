@@ -67,6 +67,23 @@ def test_chat_template_kwargs_become_extra_body(sampler):
     assert kw["extra_body"]["chat_template_kwargs"] == {"thinking": True}
 
 
+def test_min_p_and_repetition_penalty_always_sent(sampler):
+    """Both are NS ``InferenceConfig`` fields. Left unsent, sglang resolves
+    them from the served model's generation_config.json -- so a model shipping
+    e.g. repetition_penalty=1.05 would silently decode differently than under
+    an NS run, and the scores would not be comparable."""
+    sampler([{"role": "user", "content": "hi"}], GenConfig())
+    extra = sampler._captured["kwargs"]["extra_body"]
+    assert extra["min_p"] == 0.0
+    assert extra["repetition_penalty"] == 1.0
+
+
+def test_explicit_extra_body_wins_over_the_ns_defaults(sampler):
+    gen = GenConfig(extra_body={"repetition_penalty": 1.05})
+    sampler([{"role": "user", "content": "hi"}], gen)
+    assert sampler._captured["kwargs"]["extra_body"]["repetition_penalty"] == 1.05
+
+
 def test_system_message_prepended(sampler):
     gen = GenConfig(system_message="you are a helper")
     sampler([{"role": "user", "content": "hi"}], gen)

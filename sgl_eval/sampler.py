@@ -23,12 +23,24 @@ from sgl_eval.types import GenConfig, MessageList, Sample
 LOG = logging.getLogger(__name__)
 
 
+# Above any plausible --num-threads; httpx's default 100 would silently cap
+# concurrency below what the runner was told to use.
+_MAX_CONNECTIONS = 3600
+
+
 class _LargeHttpxClient(httpx.Client):
-    """httpx client tuned for long-running reasoning generations."""
+    """httpx client for generations that legitimately take hours.
+
+    The 4h read ceiling is NS's ``InferenceConfig.timeout``. ``connect`` stays
+    short: it cannot affect a score, and 4h x ``max_retries`` on an unreachable
+    endpoint looks like a hang rather than an error.
+    """
 
     def __init__(self) -> None:
-        timeout = httpx.Timeout(3600)
-        limits = httpx.Limits(max_keepalive_connections=3600, max_connections=3600)
+        timeout = httpx.Timeout(14400, connect=30)
+        limits = httpx.Limits(
+            max_keepalive_connections=_MAX_CONNECTIONS, max_connections=_MAX_CONNECTIONS
+        )
         super().__init__(timeout=timeout, limits=limits)
 
 
@@ -129,13 +141,20 @@ class ChatCompletionSampler:
         if gen.seed is not None:
             kwargs["seed"] = gen.seed
 
-        extra_body: Dict[str, Any] = {}
+        # NS sends both on every request; unsent, sglang takes them from the
+        # served model's generation_config.json instead -- how the same endpoint
+        # decodes differently here than under NS. top_k stays out because NS
+        # also only sends it when > 0. Neither is an OpenAI API param, so a
+        # strict OpenAI endpoint 400s every request.
+        extra_body: Dict[str, Any] = {
+            "min_p": gen.min_p,
+            "repetition_penalty": gen.repetition_penalty,
+        }
         if gen.chat_template_kwargs:
             extra_body["chat_template_kwargs"] = gen.chat_template_kwargs
         if gen.extra_body:
             extra_body.update(gen.extra_body)
-        if extra_body:
-            kwargs["extra_body"] = extra_body
+        kwargs["extra_body"] = extra_body
         return kwargs
 
     @staticmethod
