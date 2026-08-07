@@ -233,7 +233,7 @@ def test_headline_full_group_uses_vendored_compute_score():
     flat = _headline(per_task, 1, namespace="setup")
     assert flat["score"] == pytest.approx(0.5)
     assert len({k for k in flat if k.startswith("task.")}) == 12
-    assert "partial_group" not in flat
+    assert "task_subset" not in flat
 
 
 def test_headline_subset_is_flagged():
@@ -245,7 +245,7 @@ def test_headline_subset_is_flagged():
     }
     flat = _headline(per_task, 1, namespace="setup")
     assert flat["score"] == pytest.approx(0.5)
-    assert flat["partial_group"] == 1.0
+    assert flat["task_subset"] == 1.0
 
 
 @pytest.mark.parametrize("completed", [11, 5, 1, 0])
@@ -257,7 +257,7 @@ def test_headline_survives_an_aborted_full_group(completed):
     per_task = {t: _task_metrics(_results([1.0]), 1, "ruler2") for t in ALL_TASKS[:completed]}
     flat = _headline(per_task, 1, namespace="setup")
     assert flat["score"] == pytest.approx(1.0 if completed else 0.0)
-    assert flat["partial_group"] == 1.0
+    assert flat["task_subset"] == 1.0
     assert len({k for k in flat if k.startswith("task.")}) == completed
 
 
@@ -466,63 +466,3 @@ def test_preflight_warns_when_limit_unreadable(monkeypatch, capsys):
         _StubSampler(), Ruler2Config(max_seq_length=4096, tokenizer_path="t"), GenConfig()
     )
     assert "WARNING" in capsys.readouterr().err
-
-
-# --- refresh --------------------------------------------------------------
-
-
-def _ruler2_row(task: str, index: int, score: float) -> dict:
-    return {
-        "generation": "g",
-        "id": f"{task}-{index}",
-        "expected_answer": ["a"],
-        "num_generated_tokens": 5,
-        "num_reasoning_tokens": 0,
-        "num_answer_tokens": 5,
-        "finish_reason": "stop",
-        "problem": "",
-        "predicted_answer": "g",
-        "is_correct": score,
-    }
-
-
-def test_refresh_rebuilds_the_group_headline(tmp_path):
-    """``sgl-eval refresh`` read a hardcoded ``symbolic_correct`` and had no
-    group branch, so a ruler2 run refreshed to 0.00% -- overwriting the real
-    metrics.json. Uneven subtask counts here separate the two failures: the
-    sample-level mean is 0.25, the mean-of-subtask-means is 0.50.
-    """
-    from types import SimpleNamespace
-
-    from sgl_eval.pipeline.refresh import cmd_refresh
-
-    run_dir = tmp_path / "sgl_eval_ruler2_20260731-120000"
-    run_dir.mkdir()
-    rows = [_ruler2_row("qa_basic", 0, 1.0)] + [_ruler2_row("qa_easy", i, 0.0) for i in range(3)]
-    with (run_dir / "output-rs0.jsonl").open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row) + "\n")
-
-    assert cmd_refresh(SimpleNamespace(run_dir=str(run_dir))) == 0
-
-    agg = json.loads((run_dir / "metrics.json").read_text())["aggregate"]
-    assert agg["score"] == pytest.approx(0.5)
-    assert agg["task.qa_basic"] == pytest.approx(1.0)
-    assert agg["task.qa_easy"] == pytest.approx(0.0)
-    assert agg["partial_group"] == 1.0
-
-
-def test_refresh_rejects_unattributable_ids(tmp_path):
-    """Ids that do not name a subtask cannot be grouped; guessing a headline
-    from them would report a plausible number for the wrong denominator."""
-    from types import SimpleNamespace
-
-    from sgl_eval.pipeline.refresh import cmd_refresh
-
-    run_dir = tmp_path / "sgl_eval_ruler2_20260731-120000"
-    run_dir.mkdir()
-    with (run_dir / "output-rs0.jsonl").open("w", encoding="utf-8") as f:
-        f.write(json.dumps(_ruler2_row("not_a_task", 0, 1.0)) + "\n")
-
-    with pytest.raises(SystemExit):
-        cmd_refresh(SimpleNamespace(run_dir=str(run_dir)))

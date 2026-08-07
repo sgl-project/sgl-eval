@@ -4,7 +4,6 @@ Subcommands:
   list                 enumerate registered benchmarks
   ping                 send one chat completion to the endpoint and print it
   run <name>           run a benchmark end-to-end (orchestrated by ``pipeline``)
-  refresh <run_dir>    rebuild metrics.json locally from existing predictions
   preset list/show     manage saved (model, dataset, sampling) presets
 """
 
@@ -14,7 +13,7 @@ import argparse
 import sys
 from typing import List, Optional
 
-from sgl_eval.pipeline import cmd_refresh, cmd_run
+from sgl_eval.pipeline import cmd_run
 from sgl_eval.preset import add_preset_run_flag, register_preset_subcommand
 from sgl_eval.registry import list_evals
 from sgl_eval.sampler import ChatCompletionSampler
@@ -114,16 +113,6 @@ def build_parser() -> argparse.ArgumentParser:
     for spec in list_evals():
         if spec.add_arguments is not None:
             spec.add_arguments(p_run.add_argument_group(f"{spec.name} options"))
-
-    p_refresh = sub.add_parser(
-        "refresh",
-        help="recompute metrics.json from an existing run directory (no requests)",
-    )
-    p_refresh.add_argument(
-        "run_dir",
-        help="path to a run dir, e.g. ~/.sgl_eval/sgl_eval_aime24_<stamp>/",
-    )
-    p_refresh.set_defaults(func=cmd_refresh)
 
     register_preset_subcommand(sub)
     return parser
