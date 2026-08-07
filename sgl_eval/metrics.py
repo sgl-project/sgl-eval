@@ -124,4 +124,13 @@ def _build_rows(agg: Dict[str, float], k: int) -> List[Tuple[bool, str, str, Opt
     if error_rate is not None:
         note = "warn: request errors" if error_rate >= 0.01 else None
         rows.append((False, "error_rate", f"{error_rate * 100:.2f}%", note))
+
+    # Group benchmarks (ruler2) publish per-subtask scores as ``task.<name>``;
+    # the headline averages them, so the breakdown says which one moved.
+    task_keys = sorted(key for key in agg if key.startswith("task."))
+    if task_keys:
+        if agg.get("task_subset"):
+            rows.append((False, "group", "SUBSET (not the full 12-task group)", None))
+        for key in task_keys:
+            rows.append((False, f"  {key[len('task.'):]}", f"{agg[key] * 100:.2f}%", None))
     return rows

@@ -4,7 +4,6 @@ Subcommands:
   list                 enumerate registered benchmarks
   ping                 send one chat completion to the endpoint and print it
   run <name>           run a benchmark end-to-end (orchestrated by ``pipeline``)
-  refresh <run_dir>    rebuild metrics.json locally from existing predictions
   preset list/show     manage saved (model, dataset, sampling) presets
 """
 
@@ -14,7 +13,7 @@ import argparse
 import sys
 from typing import List, Optional
 
-from sgl_eval.pipeline import cmd_refresh, cmd_run
+from sgl_eval.pipeline import cmd_run
 from sgl_eval.preset import add_preset_run_flag, register_preset_subcommand
 from sgl_eval.registry import list_evals
 from sgl_eval.sampler import ChatCompletionSampler
@@ -22,7 +21,11 @@ from sgl_eval.types import GenConfig
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+    args = build_parser().parse_args(argv if argv is not None else sys.argv[1:])
+    return args.func(args)
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sgl-eval")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -52,11 +55,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     add_preset_run_flag(p_run)
     _add_endpoint_args(p_run, base_url_required=False)
     p_run.add_argument("--num-examples", type=int, default=None)
-    p_run.add_argument("--num-threads", type=int, default=64)
+    p_run.add_argument(
+        "--num-threads",
+        type=int,
+        default=None,
+        help="concurrent requests (default: the benchmark's own ceiling, 64 for "
+        "most, lower for long-context)",
+    )
     p_run.add_argument("--n-repeats", type=int, default=None)
     p_run.add_argument("--max-tokens", type=int, default=None)
     p_run.add_argument("--temperature", type=float, default=None)
     p_run.add_argument("--top-p", type=float, default=None)
+    p_run.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="sampling seed sent to the server (unset by default; NeMo-Skills "
+        "sends 0, so pass --seed 0 to match its runs)",
+    )
     p_run.add_argument(
         "--thinking",
         action=argparse.BooleanOptionalAction,
@@ -67,6 +83,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--reasoning-effort",
         default=None,
         help="override reasoning_effort (per-benchmark default applies otherwise)",
+    )
+    p_run.add_argument(
+        "--chat-template-kwarg",
+        action="append",
+        metavar="K=V",
+        default=None,
+        help="extra chat_template_kwargs entry, repeatable. Values parse as JSON "
+        "when possible (e.g. enable_thinking=false), else stay strings. Use this "
+        "when the model's template reads a key other than 'thinking'.",
     )
     p_run.add_argument(
         "--out-dir",
@@ -88,20 +113,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     p_run.set_defaults(func=cmd_run, dump_predictions=True)
 
-    p_refresh = sub.add_parser(
-        "refresh",
-        help="recompute metrics.json from an existing run directory (no requests)",
-    )
-    p_refresh.add_argument(
-        "run_dir",
-        help="path to a run dir, e.g. ~/.sgl_eval/sgl_eval_aime24_<stamp>/",
-    )
-    p_refresh.set_defaults(func=cmd_refresh)
+    # Benchmarks contribute their own options, so argparse -- not a hand-rolled
+    # KEY=VALUE parser -- owns their types, choices and --help text.
+    for spec in list_evals():
+        if spec.add_arguments is not None:
+            spec.add_arguments(p_run.add_argument_group(f"{spec.name} options"))
 
     register_preset_subcommand(sub)
-
-    args = parser.parse_args(argv)
-    return args.func(args)
+    return parser
 
 
 def _add_endpoint_args(p: argparse.ArgumentParser, *, base_url_required: bool = True) -> None:
@@ -132,6 +151,8 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"  temperature : {gen.temperature}")
             print(f"  top_p       : {gen.top_p}")
             print(f"  max_tokens  : {gen.max_tokens}")
+            print(f"  min_p       : {gen.min_p}")
+            print(f"  rep_penalty : {gen.repetition_penalty}")
         return 0
     width = max(len(s.name) for s in specs)
     for s in specs:

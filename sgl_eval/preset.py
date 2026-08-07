@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,6 +54,9 @@ class Sampling:
     # exposed flat here so preset YAML stays human-readable.
     thinking: Optional[bool] = None
     reasoning_effort: Optional[str] = None
+    # For templates that read some other key (Qwen3: ``enable_thinking``).
+    # Same score-changing weight as ``thinking``, so it belongs in the bundle.
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -196,29 +200,59 @@ def pick(*candidates: Any) -> Any:
     return None
 
 
+def parse_chat_template_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
+    """Parse repeated ``--chat-template-kwarg K=V`` into a dict.
+
+    Values go through JSON first (so ``false`` / ``0`` / ``[1,2]`` keep their
+    type) and fall back to the raw string. Needed because the key a model's
+    chat template reads is model-specific -- Qwen3 wants ``enable_thinking``,
+    not the generic ``thinking``.
+    """
+    parsed: Dict[str, Any] = {}
+    for item in getattr(args, "chat_template_kwarg", None) or []:
+        key, sep, raw = item.partition("=")
+        if not sep or not key.strip():
+            raise SystemExit(f"--chat-template-kwarg expects K=V, got {item!r}")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        parsed[key.strip()] = value
+    return parsed
+
+
 def apply_to_gen(
     default: GenConfig, preset: Optional["Preset"], args: argparse.Namespace
 ) -> GenConfig:
     """Resolve a final ``GenConfig`` honoring CLI > preset > default.
 
     ``args`` must expose ``temperature``, ``top_p``, ``max_tokens``,
-    ``thinking`` (any of which may be ``None`` for "unset").
+    ``thinking`` (any of which may be ``None`` for "unset"). ``seed`` is
+    optional and has no preset field -- it is a reproducibility knob, not part
+    of the run we are reproducing. ``chat_template_kwarg`` does have one: it
+    changes the prompt, so a preset that could not carry it would replay a
+    different run.
     """
     p = preset.sampling if preset else None
     chat_template_kwargs = dict(default.chat_template_kwargs or {})
     thinking = pick(args.thinking, p.thinking if p else None)
     if thinking is not None:
         chat_template_kwargs["thinking"] = thinking
+    if p and p.chat_template_kwargs:
+        chat_template_kwargs.update(p.chat_template_kwargs)
+    chat_template_kwargs.update(parse_chat_template_kwargs(args))
     return GenConfig(
         temperature=pick(args.temperature, p.temperature if p else None, default.temperature),
         top_p=pick(args.top_p, p.top_p if p else None, default.top_p),
         max_tokens=pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
+        min_p=default.min_p,
+        repetition_penalty=default.repetition_penalty,
         reasoning_effort=pick(
             args.reasoning_effort, p.reasoning_effort if p else None, default.reasoning_effort
         ),
         chat_template_kwargs=chat_template_kwargs or None,
         extra_body=default.extra_body,
-        seed=default.seed,
+        seed=pick(getattr(args, "seed", None), default.seed),
         system_message=default.system_message,
     )
 

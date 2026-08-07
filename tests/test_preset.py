@@ -143,6 +143,65 @@ def test_apply_to_gen_priority_chain() -> None:
     assert gen.temperature == 0.6
 
 
+def test_apply_to_gen_seed_is_cli_only() -> None:
+    """``seed`` has no preset field (it is a reproducibility knob, not part of
+    the run's identity), and stays unset unless the CLI asks for it."""
+    default = GenConfig()
+    assert apply_to_gen(default, preset=None, args=_args()).seed is None
+    assert apply_to_gen(default, preset=None, args=_args(seed=0)).seed == 0
+
+
+def test_apply_to_gen_keeps_ns_sampling_extras() -> None:
+    """``min_p`` / ``repetition_penalty`` are NS-aligned defaults carried on the
+    spec's GenConfig; resolution must not drop them back to the dataclass."""
+    default = GenConfig(min_p=0.01, repetition_penalty=1.05)
+    gen = apply_to_gen(default, preset=None, args=_args())
+    assert (gen.min_p, gen.repetition_penalty) == (0.01, 1.05)
+
+
+def test_chat_template_kwarg_parses_json_then_falls_back_to_string() -> None:
+    """A model's template may read any key (Qwen3 wants ``enable_thinking``),
+    and the value's type matters -- ``false`` must not arrive as ``"false"``."""
+    gen = apply_to_gen(
+        GenConfig(),
+        preset=None,
+        args=_args(chat_template_kwarg=["enable_thinking=false", "style=terse"]),
+    )
+    assert gen.chat_template_kwargs == {"enable_thinking": False, "style": "terse"}
+
+
+def test_chat_template_kwarg_wins_over_thinking() -> None:
+    gen = apply_to_gen(
+        GenConfig(chat_template_kwargs={"thinking": True}),
+        preset=None,
+        args=_args(chat_template_kwarg=["thinking=false"]),
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
+def test_preset_carries_chat_template_kwargs() -> None:
+    """A preset has to be able to replay the run it names. ``enable_thinking``
+    changes the prompt exactly like ``thinking`` does, so a preset without it
+    would silently replay with the model's default thinking state."""
+    default = GenConfig()
+    gen = apply_to_gen(
+        default, _preset_with(chat_template_kwargs={"enable_thinking": False}), _args()
+    )
+    assert gen.chat_template_kwargs == {"enable_thinking": False}
+    # CLI still wins over the preset.
+    gen = apply_to_gen(
+        default,
+        _preset_with(chat_template_kwargs={"enable_thinking": False}),
+        _args(chat_template_kwarg=["enable_thinking=true"]),
+    )
+    assert gen.chat_template_kwargs == {"enable_thinking": True}
+
+
+def test_chat_template_kwarg_rejects_missing_equals() -> None:
+    with pytest.raises(SystemExit):
+        apply_to_gen(GenConfig(), preset=None, args=_args(chat_template_kwarg=["thinking"]))
+
+
 def test_apply_to_gen_thinking_priority() -> None:
     """``thinking`` is the only sampling field that lives under
     ``chat_template_kwargs``; verify it follows the same priority chain."""
