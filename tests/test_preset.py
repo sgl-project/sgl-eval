@@ -16,6 +16,7 @@ from sgl_eval.preset import (
     list_presets,
     load_preset,
     pick,
+    reasoning_effort,
     resolve_preset_path,
 )
 from sgl_eval.types import GenConfig
@@ -228,3 +229,17 @@ def test_apply_to_gen_reasoning_effort_priority() -> None:
     # Default applies when neither CLI nor preset sets it
     gen = apply_to_gen(default, _preset_with(), _args())
     assert gen.reasoning_effort == "max"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [("low", "low"), ("0.5", 0.5), ("lo", None), ("1.5", None), ("", None)],
+)
+def test_reasoning_effort_validated_at_parse_time(raw, expected) -> None:
+    """An unaccepted value 400s every request, which the sampler turns into
+    empty samples -- the run would finish at 0% with a successful exit code."""
+    if expected is None:
+        with pytest.raises(argparse.ArgumentTypeError):
+            reasoning_effort(raw)
+    else:
+        assert reasoning_effort(raw) == expected

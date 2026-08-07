@@ -30,7 +30,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import yaml
 
@@ -53,7 +53,7 @@ class Sampling:
     # Mapped to ``GenConfig.chat_template_kwargs.thinking`` at apply time;
     # exposed flat here so preset YAML stays human-readable.
     thinking: Optional[bool] = None
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[Union[str, float]] = None
     # For templates that read some other key (Qwen3: ``enable_thinking``).
     # Same score-changing weight as ``thinking``, so it belongs in the bundle.
     chat_template_kwargs: Optional[Dict[str, Any]] = None
@@ -198,6 +198,25 @@ def pick(*candidates: Any) -> Any:
         if c is not None:
             return c
     return None
+
+
+_EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def reasoning_effort(raw: str) -> Union[str, float]:
+    """argparse ``type``: an unaccepted value 400s every request, which the
+    sampler turns into empty samples -- a whole run at 0% and exit code 0."""
+    if raw in _EFFORT_LEVELS:
+        return raw
+    try:
+        value = float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{raw!r} is not one of {', '.join(_EFFORT_LEVELS)} or a float in [0, 0.99]"
+        ) from None
+    if not 0.0 <= value <= 0.99:
+        raise argparse.ArgumentTypeError(f"float effort must be in [0, 0.99], got {value}")
+    return value
 
 
 def parse_chat_template_kwargs(args: argparse.Namespace) -> Dict[str, Any]:

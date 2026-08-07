@@ -24,6 +24,8 @@ sampling:                          # all sub-fields optional
   top_p: 0.95
   max_tokens: null
   thinking: true                   # mapped to chat_template_kwargs.thinking
+  reasoning_effort: low            # none|minimal|low|medium|high|xhigh|max,
+                                   # or a float in [0, 0.99]
   chat_template_kwargs:            # for templates reading another key
     enable_thinking: false         # (Qwen3); merged over `thinking`
 

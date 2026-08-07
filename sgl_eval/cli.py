@@ -14,7 +14,7 @@ import sys
 from typing import List, Optional
 
 from sgl_eval.pipeline import cmd_run
-from sgl_eval.preset import add_preset_run_flag, register_preset_subcommand
+from sgl_eval.preset import add_preset_run_flag, reasoning_effort, register_preset_subcommand
 from sgl_eval.registry import list_evals
 from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import GenConfig
@@ -81,8 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument(
         "--reasoning-effort",
+        type=reasoning_effort,
         default=None,
-        help="override reasoning_effort (per-benchmark default applies otherwise)",
+        metavar="LEVEL",
+        help="none|minimal|low|medium|high|xhigh|max, or a float in [0, 0.99]. "
+        "sglang derives thinking from it, so this turns thinking on for a "
+        "benchmark that defaults it off ('none' turns it off).",
     )
     p_run.add_argument(
         "--chat-template-kwarg",
