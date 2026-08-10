@@ -55,6 +55,13 @@ def load_model_preset(model_id: str) -> ModelPreset:
     return registry[model_id]
 
 
+def make_model_preset_meta_block(preset: ModelPreset | None) -> dict[str, str] | None:
+    """Return stable ``metrics.json`` provenance for a built-in preset."""
+    if preset is None:
+        return None
+    return {"model_id": preset.model_id, "source": MODEL_PRESET_SOURCE}
+
+
 def _load_registry() -> dict[str, ModelPreset]:
     try:
         raw = yaml.safe_load(MODEL_PRESET_PATH.read_text(encoding="utf-8"))

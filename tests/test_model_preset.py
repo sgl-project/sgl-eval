@@ -15,6 +15,7 @@ from sgl_eval.model_preset import (
     list_model_preset_ids,
     load_model_preset,
 )
+from sgl_eval.pipeline import report
 from sgl_eval.preset import Sampling, resolve_run_inputs
 from sgl_eval.types import GenConfig
 
@@ -203,3 +204,27 @@ sampling:
     assert cli_resolved.gen.max_tokens == 777
     assert cli_resolved.gen.reasoning_effort == "high"
     assert cli_resolved.gen.chat_template_kwargs == {"thinking": True}
+
+
+def test_report_records_model_preset_separately_from_user_preset() -> None:
+    """Without source provenance, a metrics file cannot reproduce why defaults changed."""
+    model_preset = load_model_preset(MODEL_ID)
+    ctx = SimpleNamespace(
+        stamp="20260810-120000",
+        sampler=SimpleNamespace(model=MODEL_ID),
+        inputs=SimpleNamespace(
+            base_url="http://localhost:30000/v1",
+            gen=GenConfig(),
+            model_preset=model_preset,
+        ),
+        num_threads=64,
+        bench_args={},
+    )
+
+    meta = report._build_run_meta(ctx)
+
+    assert meta["model_preset"] == {
+        "model_id": MODEL_ID,
+        "source": "sgl_eval/model_presets.yaml",
+    }
+    assert "preset" not in meta

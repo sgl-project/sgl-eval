@@ -84,6 +84,18 @@ Save a `(benchmark, endpoint, sampling, n_repeats, expected)` bundle to
 <name>`. See [`preset.md`](preset.md) for schema, example, usage, and
 override priority.
 
+For repository-maintained model defaults, select an exact supported model ID:
+
+```bash
+sgl-eval run aime25 \
+  --base-url http://localhost:30000/v1 \
+  --load-preset-from-model-id deepseek-ai/DeepSeek-V4-Flash-0731
+```
+
+This sets the served model and its recommended generation parameters, but not
+the deployment-specific `--base-url`. See [`preset.md`](preset.md#built-in-model-presets)
+for the supported model list, resolved values, and override priority.
+
 ---
 
 ## Architecture

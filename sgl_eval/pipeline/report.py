@@ -12,6 +12,7 @@ import yaml
 from sgl_eval import VENDORED_NS_ROOT
 from sgl_eval import __version__ as _SGL_EVAL_VERSION
 from sgl_eval.metrics import dump_run, format_summary
+from sgl_eval.model_preset import make_model_preset_meta_block
 from sgl_eval.pipeline.setup import RunContext
 from sgl_eval.preset import make_run_meta_block, print_expected_vs_actual
 from sgl_eval.types import RunResult
@@ -67,6 +68,9 @@ def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
     # these -- without them a metrics.json cannot say which setup it scored.
     if ctx.bench_args:
         meta["bench_args"] = dict(ctx.bench_args)
+    model_preset_block = make_model_preset_meta_block(ctx.inputs.model_preset)
+    if model_preset_block:
+        meta["model_preset"] = model_preset_block
     return meta
 
 

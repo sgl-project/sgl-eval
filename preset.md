@@ -1,5 +1,51 @@
 # Presets
 
+## Built-in model presets
+
+`--load-preset-from-model-id MODEL_ID` loads repository-maintained model
+generation defaults. These presets are shipped with `sgl-eval`; users do not
+create files under `~/.sgl_eval/presets/` for them.
+
+Initially supported model IDs:
+
+- `deepseek-ai/DeepSeek-V4-Flash-0731`
+
+Its built-in values are:
+
+```yaml
+model: deepseek-ai/DeepSeek-V4-Flash-0731
+sampling:
+  temperature: 1.0
+  top_p: 0.95
+  max_tokens: 200000
+  thinking: true
+  reasoning_effort: max
+```
+
+Run AIME25 with no explicit generation parameters:
+
+```bash
+sgl-eval run aime25 \
+  --base-url http://localhost:30000/v1 \
+  --load-preset-from-model-id deepseek-ai/DeepSeek-V4-Flash-0731
+```
+
+Built-in model presets deliberately do not contain `base_url`; pass it on the
+CLI or provide it through a user preset. An unknown model ID exits before
+contacting the endpoint, prints the complete supported-ID list, and tells the
+user which generation flags to set manually.
+
+Built-in model presets compose with the user presets described below. The
+complete priority is:
+
+`CLI flag > user preset > built-in model preset > benchmark default`
+
+`metrics.json` records built-in provenance in a separate `model_preset` block.
+
+---
+
+## User presets
+
 Save a `(benchmark, endpoint, sampling, n_repeats, expected)` bundle to
 `~/.sgl_eval/presets/<name>.yaml` and replay it with `--preset <name>`.
 CLI flags always override preset values, so a preset is a starting point,
