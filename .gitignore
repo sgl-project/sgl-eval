@@ -24,5 +24,7 @@ sgl_eval/_vendored/nemo_skills/dataset/gsm8k/original_*.jsonl
 sgl_eval/_vendored/nemo_skills/dataset/mmlu/test.jsonl
 sgl_eval/_vendored/nemo_skills/dataset/mmlu/data.tar
 sgl_eval/_vendored/nemo_skills/dataset/gpqa/*.jsonl
+sgl_eval/_vendored/nemo_skills/dataset/mmmu_pro_vision/*.jsonl
+sgl_eval/_vendored/nemo_skills/dataset/mmmu_pro_vision/images/
 
 /preset_config/

@@ -7,6 +7,9 @@ no new module. Each entry encodes only the things that genuinely differ:
   (run vendored ``prepare.py:save_data``).
 - ``save_args`` / ``save_kwargs``: signature for ``save_data`` when
   ``loader == "prepare"``.
+- ``media_dir`` / ``media_field``: multimodal ``prepare`` benchmarks only --
+  the sidecar directory ``save_data`` writes beside its jsonl, and the jsonl
+  column holding each row's path into it.
 - ``thinking``: whether to set ``chat_template_kwargs={"thinking": True}``
   by default. True for reasoning benchmarks (aime / gpqa); off otherwise.
 - ``default_n_repeats``: per-example repeat count (sgl-eval choice; NS
@@ -25,9 +28,10 @@ single value here would encode a model-specific assumption.
 ``metrics_type`` and the prompt yaml basename are derived at registration
 time from the vendored ``dataset/<name>/__init__.py`` (``METRICS_TYPE`` +
 ``GENERATION_ARGS``), so we never hand-mirror upstream's per-benchmark
-choices. Two rows opt out by declaring both explicitly: ``mmmu_pro`` (no
-upstream module) and ``ruler2`` (upstream ships no dataset metadata -- its
-subtasks only exist once generated).
+choices. Two rows opt out by declaring both explicitly: ``mmmu_pro``
+(upstream ships MMMU-Pro's ``vision`` config only, not the
+``standard (10 options)`` one this row evaluates) and ``ruler2`` (upstream
+ships no dataset metadata -- its subtasks only exist once generated).
 """
 
 from __future__ import annotations
@@ -98,8 +102,10 @@ _TABLE = [
         "description": "GPQA Diamond (graduate-level QA, pass@k + majority@k).",
     },
     {
-        # SE-own benchmark (NS upstream has no MMMU-Pro). metrics_type + prompt
-        # + loader_fn bypass the vendored dataset/__init__.py + prepare path.
+        # SE-own: upstream ships MMMU-Pro's `vision` config only (registered
+        # below as `mmmu_pro_vision`), not `standard (10 options)`. So
+        # metrics_type + prompt + loader_fn bypass the vendored
+        # dataset/__init__.py + prepare path.
         "name": "mmmu_pro",
         "metrics_type": "multichoice",
         "prompt": "mcq-10choices",
@@ -107,6 +113,22 @@ _TABLE = [
         "thinking": False,
         "default_n_repeats": 1,
         "description": "MMMU-Pro (multimodal, 10-choice, vision-dependent).",
+    },
+    {
+        # MMMU-Pro `vision`: the question and its options are rendered into a
+        # single screenshot, so `problem` carries only the option list and the
+        # prompt is just an answer-format instruction placed after the image
+        # (`image_position: before` in the vendored yaml). A different task
+        # from `mmmu_pro` above, not a different prompt for the same one --
+        # scores are not comparable between the two rows.
+        "name": "mmmu_pro_vision",
+        "loader": "prepare",
+        "save_args": ("test",),
+        "media_dir": "images",
+        "media_field": "image_path",
+        "thinking": False,
+        "default_n_repeats": 1,
+        "description": "MMMU-Pro vision config (whole question rendered as one screenshot).",
     },
     {
         # Group benchmark: 12 subtasks scored separately, then averaged by
@@ -172,6 +194,8 @@ def _build_loader(entry: dict):
             entry["name"],
             list(entry["save_args"]),
             entry.get("save_kwargs", {}),
+            media_dir=entry.get("media_dir"),
+            media_field=entry.get("media_field"),
         )
     raise ValueError(f"unknown loader kind: {kind!r}")
 
