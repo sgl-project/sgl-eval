@@ -6,11 +6,10 @@
 generation defaults. These presets are shipped with `sgl-eval`; users do not
 create files under `~/.sgl_eval/presets/` for them.
 
-Initially supported model IDs:
+### Usage example: DeepSeek V4 Flash 0731
 
-- `deepseek-ai/DeepSeek-V4-Flash-0731`
-
-Its built-in values are:
+The built-in preset for `deepseek-ai/DeepSeek-V4-Flash-0731` provides these
+values:
 
 ```yaml
 model: deepseek-ai/DeepSeek-V4-Flash-0731

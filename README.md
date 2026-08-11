@@ -87,9 +87,9 @@ override priority.
 For repository-maintained model defaults, select an exact supported model ID:
 
 ```bash
-sgl-eval run aime25 \
-  --base-url http://localhost:30000/v1 \
-  --load-preset-from-model-id deepseek-ai/DeepSeek-V4-Flash-0731
+sgl-eval run BENCHMARK \
+  --base-url BASE_URL \
+  --load-preset-from-model-id MODEL_ID
 ```
 
 This sets the served model and its recommended generation parameters, but not
