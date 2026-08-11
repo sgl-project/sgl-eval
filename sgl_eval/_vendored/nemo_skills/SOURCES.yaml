@@ -114,6 +114,18 @@ files:
     dst: dataset/gpqa/__init__.py
   - src: nemo_skills/dataset/gpqa/prepare.py
     dst: dataset/gpqa/prepare.py
+  # MMMU-Pro `vision` config: the whole question, options included, is
+  # rendered into one screenshot, so `prepare.py` builds `problem` from the
+  # options alone and writes a sidecar `images/` dir referenced by
+  # `image_path`. Upstream's dir is `mmmu-pro`; `dst` uses underscores
+  # because `_resolve_upstream_metadata` imports it as a Python module and a
+  # hyphen is not a legal module name. The name also has to say `vision` --
+  # sgl-eval's own `mmmu_pro` benchmark evaluates the `standard (10 options)`
+  # config, which upstream does not ship.
+  - src: nemo_skills/dataset/mmmu-pro/__init__.py
+    dst: dataset/mmmu_pro_vision/__init__.py
+  - src: nemo_skills/dataset/mmmu-pro/prepare.py
+    dst: dataset/mmmu_pro_vision/prepare.py
 
   # --- RULER2 (synthetic long-context; generated per tokenizer + seq length) ---
   # Upstream ships no test split for this one: `__init__.py` is just
@@ -153,6 +165,12 @@ files:
   # long context is already assembled by the prepare scripts.
   - src: nemo_skills/prompt/config/generic/default.yaml
     dst: prompts/default.yaml
+  # mmmu_pro_vision's ++prompt_config (`vlm/mmmu-pro`). The `dst` basename
+  # must stay hyphenated: `_resolve_upstream_metadata` derives it from
+  # GENERATION_ARGS via `prompt_config.split("/")[-1]`. Carries
+  # `image_position: before`, which `_prompts.prompt_media_config` reads.
+  - src: nemo_skills/prompt/config/vlm/mmmu-pro.yaml
+    dst: prompts/mmmu-pro.yaml
 
   # --- upstream's own behavior tests ---
   # Run as part of `pytest`. These are NS's canonical regression cases,
