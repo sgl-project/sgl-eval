@@ -115,12 +115,10 @@ _TABLE = [
         "description": "MMMU-Pro (multimodal, 10-choice, vision-dependent).",
     },
     {
-        # MMMU-Pro `vision`: the question and its options are rendered into a
-        # single screenshot, so `problem` carries only the option list and the
-        # prompt is just an answer-format instruction placed after the image
-        # (`image_position: before` in the vendored yaml). A different task
-        # from `mmmu_pro` above, not a different prompt for the same one --
-        # scores are not comparable between the two rows.
+        # MMMU-Pro `vision`: question and options are rendered into one
+        # screenshot, so `problem` carries just the option list. A different
+        # task from `mmmu_pro` above, not a different prompt for the same one
+        # -- scores are not comparable between the two rows.
         "name": "mmmu_pro_vision",
         "loader": "prepare",
         "save_args": ("test",),

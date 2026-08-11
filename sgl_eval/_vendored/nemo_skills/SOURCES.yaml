@@ -23,6 +23,7 @@ pinned_deps:
   numpy: ""                     # upstream pin: unversioned
   tqdm: ""                      # upstream pin: unversioned (used by evaluator/base.py)
   editdistance: ""              # upstream pin: unversioned (evaluator/ruler.py WER)
+  datasets: ""                  # upstream pin: unversioned (every dataset/*/prepare.py)
   # RULER2 dataset generation only. Kept out of the core install because
   # nothing else needs them and `transformers` is heavy -- they live in the
   # `longcontext` extra. All four are imported by dataset/ruler2/prepare_*.py;
@@ -114,14 +115,10 @@ files:
     dst: dataset/gpqa/__init__.py
   - src: nemo_skills/dataset/gpqa/prepare.py
     dst: dataset/gpqa/prepare.py
-  # MMMU-Pro `vision` config: the whole question, options included, is
-  # rendered into one screenshot, so `prepare.py` builds `problem` from the
-  # options alone and writes a sidecar `images/` dir referenced by
-  # `image_path`. Upstream's dir is `mmmu-pro`; `dst` uses underscores
-  # because `_resolve_upstream_metadata` imports it as a Python module and a
-  # hyphen is not a legal module name. The name also has to say `vision` --
-  # sgl-eval's own `mmmu_pro` benchmark evaluates the `standard (10 options)`
-  # config, which upstream does not ship.
+  # MMMU-Pro `vision` config (see `_registry.py` for what it evaluates).
+  # `dst` de-hyphenates because `_resolve_upstream_metadata` imports this dir
+  # as a Python module; it says `vision` to stay distinct from the `mmmu_pro`
+  # row, which evaluates a config upstream does not ship.
   - src: nemo_skills/dataset/mmmu-pro/__init__.py
     dst: dataset/mmmu_pro_vision/__init__.py
   - src: nemo_skills/dataset/mmmu-pro/prepare.py

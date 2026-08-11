@@ -32,10 +32,10 @@ def build_user_content(
     as ``data:`` base64; video uses a ``video_url`` block (too large to inline).
 
     ``image_position`` (from the prompt yaml, see
-    ``_prompts.prompt_media_config``) applies only when the prompt carries no
-    ``[image]`` placeholder: ``"before"`` puts every image ahead of the text,
-    which is what screenshot-style benchmarks need since the text is just an
-    answer-format instruction. Explicit placeholders always win over it.
+    ``_prompts.prompt_media_config``) applies only when the prompt has no
+    ``[image]`` placeholder -- an explicit position always wins. ``"before"``
+    suits screenshot benchmarks, whose text is only an answer-format
+    instruction.
     """
     if not media:
         return prompt

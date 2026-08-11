@@ -11,11 +11,9 @@ Two patterns are needed across the current benchmark set:
     HuggingFace). We invoke the vendored function once, move its output to
     ``~/.cache/sgl_eval/<name>/``, and serve from cache on subsequent runs.
 
-Multimodal ``prepare`` benchmarks additionally write a media sidecar
-directory beside the jsonl and reference it by relative path (mmmu_pro_vision
--> ``images/`` + ``image_path``). ``media_dir`` / ``media_field`` move that
-directory into the same cache dir and resolve each row's file into
-``Example.media``.
+A multimodal **prepare** benchmark also writes a media sidecar dir beside its
+jsonl and references it by relative path (mmmu_pro_vision -> ``images/`` +
+``image_path``); see ``load_via_prepare``.
 """
 
 from __future__ import annotations
@@ -55,12 +53,9 @@ def _row_to_example(
 
 
 def _row_media(row: dict, media_field: str, base_dir: Path) -> List[MediaItem]:
-    """Resolve a row's media path into an in-memory ``MediaItem``.
-
-    A row whose media file is missing is a corrupt cache, not a data variation
-    -- fail loudly rather than silently evaluating a screenshot benchmark as
-    text (the failure mode behind MMMU-Pro's original 9% baseline).
-    """
+    """A missing media file is a corrupt cache, not a data variation -- fail
+    loudly rather than silently evaluating a screenshot benchmark as text (the
+    failure mode behind MMMU-Pro's original 9% baseline)."""
     rel = row.get(media_field)
     if not rel:
         return []
@@ -143,10 +138,9 @@ def load_via_prepare(
     """Loader that runs vendored ``<name>/prepare.py:save_data`` once and
     caches the resulting JSONL.
 
-    ``media_dir`` is a sidecar directory ``save_data`` writes beside the jsonl
-    (relative to the vendored package dir); ``media_field`` is the jsonl column
-    holding each row's path into it. Both move to the cache dir together so the
-    relative paths keep resolving.
+    ``media_dir`` is a sidecar dir ``save_data`` writes beside the jsonl;
+    ``media_field`` is the jsonl column pointing into it. Both land in the cache
+    dir together so the relative paths keep resolving.
     """
     save_kwargs = save_kwargs or {}
     output_basename = f"{save_args[0]}.jsonl"
@@ -160,10 +154,8 @@ def load_via_prepare(
             mod.save_data(*save_args, **save_kwargs)
             cache_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(vendored_dir / output_basename), str(cache_path))
-            # save_data writes the sidecar into _vendored (its data_dir is
-            # `Path(__file__).parent`), so it has to move out alongside the
-            # jsonl -- otherwise the cached relative paths dangle and
-            # _vendored accumulates generated data.
+            # save_data's data_dir is `Path(__file__).parent`, i.e. inside
+            # _vendored -- the sidecar has to come out with the jsonl.
             if media_dir:
                 _move_tree(vendored_dir / media_dir, cache_dir / media_dir)
         return _read_jsonl(cache_path, name, num_examples, media_field, cache_dir)

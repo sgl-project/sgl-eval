@@ -83,13 +83,12 @@ Verified equivalent to `ns eval --benchmarks=mmmu-pro`: same prepared
 concurrency pinned to 1 on both sides, byte-identical generations and the same
 score question by question.
 
-> Concurrency is not score-neutral in practice even though it should be. Two
-> back-to-back greedy runs of this benchmark at `--num-threads 64` differed on
-> ~half the raw generations and landed 7 points apart on 100 questions --
-> batch composition shifts kernel selection, which flips argmax on questions
-> the model is unsure about. That run-to-run spread dwarfs any harness
-> difference, so treat a single concurrent run as a noisy estimate and pin
-> concurrency to 1 when a run has to be reproducible.
+> Concurrency should be score-neutral but is not: two back-to-back greedy runs
+> at `--num-threads 64` differed on ~half the raw generations and landed 7
+> points apart on 100 questions, because batch composition shifts kernel
+> selection and flips argmax wherever the model is unsure. That spread dwarfs
+> any harness difference -- treat a single concurrent run as a noisy estimate,
+> and pin concurrency to 1 when a number has to be reproducible.
 
 One difference has no sgl-eval equivalent: NS can mark an answer incorrect
 when its token count exceeds a `max_seq_len` threshold. Nothing sets it in
