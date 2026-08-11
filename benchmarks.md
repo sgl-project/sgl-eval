@@ -13,7 +13,8 @@ an endpoint. Most need nothing.
 | `aime24/25/26` | math | one per contest year, same shape |
 | `mmlu` | multichoice | -- |
 | `gpqa` | multichoice | Diamond split |
-| `mmmu_pro` | multichoice | vision-dependent; the endpoint must serve a VLM |
+| `mmmu_pro` | multichoice | VLM endpoint; MMMU-Pro `standard (10 options)` -- [see below](#mmmu-pro-variants) |
+| `mmmu_pro_vision` | multichoice | VLM endpoint; MMMU-Pro `vision` -- [see below](#mmmu-pro-variants) |
 | `ruler2` | ruler2 | extra install, a required flag, generated data -- [see below](#ruler2) |
 
 All scoring behavior (prompt, answer extraction, grading, pass@k /
@@ -29,8 +30,69 @@ Sampling lines up with NS's `InferenceConfig` field for field, including
 to the served model's `generation_config.json`, which would otherwise decide
 them.
 
-One knob differs: NS sends `seed=0`, sgl-eval sends none unless asked. Add
-`--seed 0` to match. It has no effect at `temperature=0`.
+Two knobs differ.
+
+**`seed`**: NS sends `seed=0`, sgl-eval sends none unless asked. Add `--seed 0`
+to match. It has no effect at `temperature=0`.
+
+**`temperature`, if the NS run went through `ns eval`**: that pipeline does
+*not* use `InferenceConfig`'s `temperature=0.0`. The repeat suffix on
+`--benchmarks` decides it -- `<bench>` and `<bench>:0` mean greedy, but
+`<bench>:1` and above default to **`temperature=0.7`**. So a harness building
+its spec as `f"{bench}:{repeats}"` gets 0.7 even when it means "run once",
+and sgl-eval's greedy default will not reproduce it. Pass
+`--temperature 0.7 --seed 0` to match such a run, or re-baseline against
+greedy.
+
+---
+
+## MMMU-Pro variants
+
+MMMU-Pro ships several HuggingFace configs. Two are registered, and they are
+**different tasks -- their scores are not comparable**:
+
+| | `mmmu_pro` | `mmmu_pro_vision` |
+|---|---|---|
+| HF config | `standard (10 options)` | `vision` |
+| question text | in the prompt | rendered into the screenshot |
+| options | up to 10, as text | in the screenshot (and echoed as text) |
+| images per question | `<image 1..7>`, placed inline | one screenshot, placed first |
+| prompt | sgl-eval's `mcq-10choices`, asks for CoT | vendored `vlm/mmmu-pro`, no CoT |
+
+`mmmu_pro_vision` is the one upstream NeMo-Skills ships, so it is the row to
+use when reproducing an NS number or an `ns eval --benchmarks=mmmu-pro` run.
+Upstream has no `standard (10 options)` module, which is why `mmmu_pro` keeps
+an sgl-eval-own loader and prompt.
+
+Picking the row is not sufficient on its own -- sgl-eval's defaults are
+greedy and let the endpoint pick `max_tokens`, so both have to be passed
+explicitly to match an `ns eval` run (see the `temperature` note
+[above](#matching-a-nemo-skills-run) for why 0.7 rather than 0.0):
+
+```bash
+sgl-eval run mmmu_pro_vision --base-url ... \
+    --max-tokens 32768 --temperature 0.7 --seed 0 --num-threads 512
+```
+
+`--num-threads` only affects wall-clock, not the expected score -- the
+registered default is 64, NS's own runs use 512. Add `--num-examples N` if the
+run being matched capped its sample count.
+
+Verified equivalent to `ns eval --benchmarks=mmmu-pro`: same prepared
+`test.jsonl` (identical md5), byte-identical rendered messages, and with
+concurrency pinned to 1 on both sides, byte-identical generations and the same
+score question by question.
+
+> Concurrency should be score-neutral but is not: two back-to-back greedy runs
+> at `--num-threads 64` differed on ~half the raw generations and landed 7
+> points apart on 100 questions, because batch composition shifts kernel
+> selection and flips argmax wherever the model is unsure. That spread dwarfs
+> any harness difference -- treat a single concurrent run as a noisy estimate,
+> and pin concurrency to 1 when a number has to be reproducible.
+
+One difference has no sgl-eval equivalent: NS can mark an answer incorrect
+when its token count exceeds a `max_seq_len` threshold. Nothing sets it in
+the sglang harness, so it does not affect a comparison today.
 
 ---
 

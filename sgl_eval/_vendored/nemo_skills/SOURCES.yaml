@@ -23,6 +23,7 @@ pinned_deps:
   numpy: ""                     # upstream pin: unversioned
   tqdm: ""                      # upstream pin: unversioned (used by evaluator/base.py)
   editdistance: ""              # upstream pin: unversioned (evaluator/ruler.py WER)
+  datasets: ""                  # upstream pin: unversioned (every dataset/*/prepare.py)
   # RULER2 dataset generation only. Kept out of the core install because
   # nothing else needs them and `transformers` is heavy -- they live in the
   # `longcontext` extra. All four are imported by dataset/ruler2/prepare_*.py;
@@ -114,6 +115,14 @@ files:
     dst: dataset/gpqa/__init__.py
   - src: nemo_skills/dataset/gpqa/prepare.py
     dst: dataset/gpqa/prepare.py
+  # MMMU-Pro `vision` config (see `_registry.py` for what it evaluates).
+  # `dst` de-hyphenates because `_resolve_upstream_metadata` imports this dir
+  # as a Python module; it says `vision` to stay distinct from the `mmmu_pro`
+  # row, which evaluates a config upstream does not ship.
+  - src: nemo_skills/dataset/mmmu-pro/__init__.py
+    dst: dataset/mmmu_pro_vision/__init__.py
+  - src: nemo_skills/dataset/mmmu-pro/prepare.py
+    dst: dataset/mmmu_pro_vision/prepare.py
 
   # --- RULER2 (synthetic long-context; generated per tokenizer + seq length) ---
   # Upstream ships no test split for this one: `__init__.py` is just
@@ -153,6 +162,12 @@ files:
   # long context is already assembled by the prepare scripts.
   - src: nemo_skills/prompt/config/generic/default.yaml
     dst: prompts/default.yaml
+  # mmmu_pro_vision's ++prompt_config (`vlm/mmmu-pro`). The `dst` basename
+  # must stay hyphenated: `_resolve_upstream_metadata` derives it from
+  # GENERATION_ARGS via `prompt_config.split("/")[-1]`. Carries
+  # `image_position: before`, which `_prompts.prompt_media_config` reads.
+  - src: nemo_skills/prompt/config/vlm/mmmu-pro.yaml
+    dst: prompts/mmmu-pro.yaml
 
   # --- upstream's own behavior tests ---
   # Run as part of `pytest`. These are NS's canonical regression cases,

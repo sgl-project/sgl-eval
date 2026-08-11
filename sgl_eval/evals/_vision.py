@@ -7,8 +7,8 @@ video_url blocks otherwise. The sampler passes it through unchanged.
 
 Image placement: if the prompt contains ``[image]`` placeholders (left by
 the MMMU-Pro loader after stripping ``<image n>``), images are inserted at
-those positions to preserve in-question order; otherwise they are appended
-after the text.
+those positions to preserve in-question order; otherwise ``image_position``
+decides, defaulting to appending after the text.
 """
 
 from __future__ import annotations
@@ -23,11 +23,19 @@ ContentType = Union[str, list]
 _IMAGE_PLACEHOLDER = "[image]"
 
 
-def build_user_content(prompt: str, media: List[MediaItem]) -> ContentType:
+def build_user_content(
+    prompt: str, media: List[MediaItem], image_position: str = "after"
+) -> ContentType:
     """Render a user message ``content`` for the given prompt + media.
 
     No media -> plain string (text-benchmark path, unchanged). Images inline
     as ``data:`` base64; video uses a ``video_url`` block (too large to inline).
+
+    ``image_position`` (from the prompt yaml, see
+    ``_prompts.prompt_media_config``) applies only when the prompt has no
+    ``[image]`` placeholder -- an explicit position always wins. ``"before"``
+    suits screenshot benchmarks, whose text is only an answer-format
+    instruction.
     """
     if not media:
         return prompt
@@ -36,7 +44,7 @@ def build_user_content(prompt: str, media: List[MediaItem]) -> ContentType:
     image_idx = 0
 
     # Insert images at [image] placeholders to preserve in-question order
-    # (e.g. MMMU-Pro's <image n> position); fall back to appending after text.
+    # (e.g. MMMU-Pro's <image n> position); fall back to image_position.
     if image_media and _IMAGE_PLACEHOLDER in prompt:
         parts = prompt.split(_IMAGE_PLACEHOLDER)
         for idx, part in enumerate(parts):
@@ -49,6 +57,11 @@ def build_user_content(prompt: str, media: List[MediaItem]) -> ContentType:
                 else:
                     # placeholder with no matching image: visible, not silently dropped
                     content.append({"type": "text", "text": "[image missing]"})
+    elif image_media and image_position == "before":
+        for m in image_media:
+            content.append(_image_block(m))
+        image_idx = len(image_media)
+        content.append({"type": "text", "text": prompt})
     else:
         content.append({"type": "text", "text": prompt})
 

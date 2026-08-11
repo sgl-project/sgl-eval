@@ -10,6 +10,10 @@ Two patterns are needed across the current benchmark set:
     (gsm8k from openai/grade-school-math, mmlu from Berkeley tar, gpqa from
     HuggingFace). We invoke the vendored function once, move its output to
     ``~/.cache/sgl_eval/<name>/``, and serve from cache on subsequent runs.
+
+A multimodal **prepare** benchmark also writes a media sidecar dir beside its
+jsonl and references it by relative path (mmmu_pro_vision -> ``images/`` +
+``image_path``); see ``load_via_prepare``.
 """
 
 from __future__ import annotations
@@ -22,26 +26,62 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from sgl_eval import VENDORED_NS_ROOT
-from sgl_eval.types import Example
+from sgl_eval.types import Example, MediaItem
 
 _CACHE_ROOT = Path.home() / ".cache" / "sgl_eval"
 _VENDORED_DATASET_ROOT = VENDORED_NS_ROOT / "dataset"
 
+_MIME_BY_SUFFIX = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
 
-def _row_to_example(row: dict, idx: int, name: str) -> Example:
+
+def _row_to_example(
+    row: dict, idx: int, name: str, media: Optional[List[MediaItem]] = None
+) -> Example:
     return Example(
         id=row.get("id") or f"{name}-{idx}",
         inputs={"problem": row["problem"]},
         target=row["expected_answer"],
         meta={k: v for k, v in row.items() if k not in ("problem", "expected_answer", "id")},
+        media=media or [],
     )
 
 
-def _read_jsonl(path: Path, name: str, num_examples: Optional[int]) -> List[Example]:
+def _row_media(row: dict, media_field: str, base_dir: Path) -> List[MediaItem]:
+    """A missing media file is a corrupt cache, not a data variation -- fail
+    loudly rather than silently evaluating a screenshot benchmark as text (the
+    failure mode behind MMMU-Pro's original 9% baseline)."""
+    rel = row.get(media_field)
+    if not rel:
+        return []
+    path = base_dir / rel
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"{media_field}={rel!r} missing under {base_dir}; "
+            f"delete the cache dir to force a re-prepare"
+        )
+    mime = _MIME_BY_SUFFIX.get(path.suffix.lower(), "application/octet-stream")
+    return [MediaItem(kind="image", data=path.read_bytes(), mime=mime)]
+
+
+def _read_jsonl(
+    path: Path,
+    name: str,
+    num_examples: Optional[int],
+    media_field: Optional[str] = None,
+    media_base: Optional[Path] = None,
+) -> List[Example]:
     examples: List[Example] = []
     with path.open("rt", encoding="utf-8") as f:
         for i, line in enumerate(f):
-            examples.append(_row_to_example(json.loads(line), i, name))
+            row = json.loads(line)
+            media = _row_media(row, media_field, media_base) if media_field else []
+            examples.append(_row_to_example(row, i, name, media))
             if num_examples and len(examples) >= num_examples:
                 break
     return examples
@@ -92,9 +132,16 @@ def load_via_prepare(
     name: str,
     save_args: List[Any],
     save_kwargs: Optional[Dict[str, Any]] = None,
+    media_dir: Optional[str] = None,
+    media_field: Optional[str] = None,
 ) -> Callable[[Optional[int]], List[Example]]:
     """Loader that runs vendored ``<name>/prepare.py:save_data`` once and
-    caches the resulting JSONL."""
+    caches the resulting JSONL.
+
+    ``media_dir`` is a sidecar dir ``save_data`` writes beside the jsonl;
+    ``media_field`` is the jsonl column pointing into it. Both land in the cache
+    dir together so the relative paths keep resolving.
+    """
     save_kwargs = save_kwargs or {}
     output_basename = f"{save_args[0]}.jsonl"
 
@@ -107,6 +154,18 @@ def load_via_prepare(
             mod.save_data(*save_args, **save_kwargs)
             cache_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(vendored_dir / output_basename), str(cache_path))
-        return _read_jsonl(cache_path, name, num_examples)
+            # save_data's data_dir is `Path(__file__).parent`, i.e. inside
+            # _vendored -- the sidecar has to come out with the jsonl.
+            if media_dir:
+                _move_tree(vendored_dir / media_dir, cache_dir / media_dir)
+        return _read_jsonl(cache_path, name, num_examples, media_field, cache_dir)
 
     return loader
+
+
+def _move_tree(src: Path, dst: Path) -> None:
+    if not src.is_dir():
+        raise FileNotFoundError(f"prepare.py produced no media dir at {src}")
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.move(str(src), str(dst))
