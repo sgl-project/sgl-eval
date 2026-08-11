@@ -30,11 +30,14 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import yaml
 
 from sgl_eval.types import GenConfig
+
+if TYPE_CHECKING:
+    from sgl_eval.model_preset import ModelPreset
 
 PRESET_ROOT = Path.home() / ".sgl_eval" / "presets"
 
@@ -241,9 +244,12 @@ def parse_chat_template_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def apply_to_gen(
-    default: GenConfig, preset: Optional["Preset"], args: argparse.Namespace
+    default: GenConfig,
+    preset: Optional["Preset"],
+    args: argparse.Namespace,
+    model_preset: Optional["ModelPreset"] = None,
 ) -> GenConfig:
-    """Resolve a final ``GenConfig`` honoring CLI > preset > default.
+    """Resolve ``CLI > user preset > model preset > benchmark default``.
 
     ``args`` must expose ``temperature``, ``top_p``, ``max_tokens``,
     ``thinking`` (any of which may be ``None`` for "unset"). ``seed`` is
@@ -253,21 +259,46 @@ def apply_to_gen(
     different run.
     """
     p = preset.sampling if preset else None
+    mp = model_preset.sampling if model_preset else None
     chat_template_kwargs = dict(default.chat_template_kwargs or {})
-    thinking = pick(args.thinking, p.thinking if p else None)
+    thinking = pick(
+        args.thinking,
+        p.thinking if p else None,
+        mp.thinking if mp else None,
+    )
     if thinking is not None:
         chat_template_kwargs["thinking"] = thinking
+    if mp and mp.chat_template_kwargs:
+        chat_template_kwargs.update(mp.chat_template_kwargs)
     if p and p.chat_template_kwargs:
         chat_template_kwargs.update(p.chat_template_kwargs)
     chat_template_kwargs.update(parse_chat_template_kwargs(args))
     return GenConfig(
-        temperature=pick(args.temperature, p.temperature if p else None, default.temperature),
-        top_p=pick(args.top_p, p.top_p if p else None, default.top_p),
-        max_tokens=pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
+        temperature=pick(
+            args.temperature,
+            p.temperature if p else None,
+            mp.temperature if mp else None,
+            default.temperature,
+        ),
+        top_p=pick(
+            args.top_p,
+            p.top_p if p else None,
+            mp.top_p if mp else None,
+            default.top_p,
+        ),
+        max_tokens=pick(
+            args.max_tokens,
+            p.max_tokens if p else None,
+            mp.max_tokens if mp else None,
+            default.max_tokens,
+        ),
         min_p=default.min_p,
         repetition_penalty=default.repetition_penalty,
         reasoning_effort=pick(
-            args.reasoning_effort, p.reasoning_effort if p else None, default.reasoning_effort
+            args.reasoning_effort,
+            p.reasoning_effort if p else None,
+            mp.reasoning_effort if mp else None,
+            default.reasoning_effort,
         ),
         chat_template_kwargs=chat_template_kwargs or None,
         extra_body=default.extra_body,
@@ -289,6 +320,7 @@ class ResolvedRunInputs:
     num_examples: Optional[int]
     gen: GenConfig
     preset: Optional["Preset"]
+    model_preset: Optional["ModelPreset"]
 
 
 def resolve_run_inputs(
@@ -302,7 +334,21 @@ def resolve_run_inputs(
     ``sys.exit`` on missing benchmark or base_url -- same UX the CLI had
     before this refactor.
     """
+    from sgl_eval.model_preset import UnsupportedModelPresetError, load_model_preset
+
     preset = load_preset(args.preset) if args.preset else None
+    model_preset_id = getattr(args, "load_preset_from_model_id", None)
+    try:
+        model_preset = load_model_preset(model_preset_id) if model_preset_id else None
+    except UnsupportedModelPresetError as exc:
+        supported = "\n".join(f"  - {model_id}" for model_id in exc.supported_model_ids)
+        sys.exit(
+            f"error: no built-in model preset for {exc.model_id!r}.\n"
+            f"Supported model IDs:\n{supported}\n"
+            "Omit --load-preset-from-model-id and configure the benchmark manually with "
+            "--model, --temperature, --top-p, --max-tokens, --thinking/--no-thinking, "
+            "and --reasoning-effort."
+        )
     benchmark = pick(args.name, preset.benchmark if preset else None)
     if not benchmark:
         sys.exit("error: benchmark name required (positional arg or --preset)")
@@ -310,20 +356,29 @@ def resolve_run_inputs(
 
     base_url = pick(args.base_url, preset.endpoint.base_url if preset else None)
     if not base_url:
-        sys.exit("error: --base-url required (or set in preset endpoint.base_url)")
+        detail = "; built-in model presets do not set endpoints" if model_preset is not None else ""
+        sys.exit(
+            "error: --base-url required "
+            f"(pass it explicitly or set preset endpoint.base_url{detail})"
+        )
 
     return ResolvedRunInputs(
         benchmark=spec.name,
         base_url=base_url,
-        model=pick(args.model, preset.endpoint.model if preset else None),
+        model=pick(
+            args.model,
+            preset.endpoint.model if preset else None,
+            model_preset.model if model_preset else None,
+        ),
         n_repeats=pick(
             args.n_repeats,
             preset.n_repeats if preset else None,
             spec.default_n_repeats,
         ),
         num_examples=pick(args.num_examples, preset.num_examples if preset else None),
-        gen=apply_to_gen(spec.default_gen, preset, args),
+        gen=apply_to_gen(spec.default_gen, preset, args, model_preset),
         preset=preset,
+        model_preset=model_preset,
     )
 
 

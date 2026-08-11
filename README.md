@@ -84,6 +84,18 @@ Save a `(benchmark, endpoint, sampling, n_repeats, expected)` bundle to
 <name>`. See [`preset.md`](preset.md) for schema, example, usage, and
 override priority.
 
+For repository-maintained model defaults, select an exact supported model ID:
+
+```bash
+sgl-eval run BENCHMARK \
+  --base-url BASE_URL \
+  --load-preset-from-model-id MODEL_ID
+```
+
+This sets the served model and its recommended generation parameters, but not
+the deployment-specific `--base-url`. See [`preset.md`](preset.md#built-in-model-presets)
+for the supported model list, resolved values, and override priority.
+
 ---
 
 ## Architecture

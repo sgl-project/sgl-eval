@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="benchmark name (see `sgl-eval list`); optional if --preset provides one",
     )
     add_preset_run_flag(p_run)
+    p_run.add_argument(
+        "--load-preset-from-model-id",
+        metavar="MODEL_ID",
+        default=None,
+        help="load repository-owned generation defaults for an exact supported model ID",
+    )
     _add_endpoint_args(p_run, base_url_required=False)
     p_run.add_argument("--num-examples", type=int, default=None)
     p_run.add_argument(

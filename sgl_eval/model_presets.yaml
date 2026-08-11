@@ -1,0 +1,10 @@
+version: 1
+models:
+  deepseek-ai/DeepSeek-V4-Flash-0731:
+    model: deepseek-ai/DeepSeek-V4-Flash-0731
+    sampling:
+      temperature: 1.0
+      top_p: 0.95
+      max_tokens: 200000
+      thinking: true
+      reasoning_effort: max

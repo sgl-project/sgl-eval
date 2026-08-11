@@ -84,6 +84,7 @@ include = ["sgl_eval*"]
 exclude = ["tests*", "scripts*"]
 
 [tool.setuptools.package-data]
+"sgl_eval" = ["model_presets.yaml"]
 "sgl_eval._vendored.nemo_skills" = [
     "SOURCES.yaml",
     "prompts/*.yaml",
