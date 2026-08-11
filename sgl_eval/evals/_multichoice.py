@@ -24,7 +24,7 @@ _mcq_mod.tqdm = lambda iterable, **_kwargs: iterable
 
 from sgl_eval._vendored.nemo_skills.evaluator.mcq import eval_mcq  # noqa: E402
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics  # noqa: E402
-from sgl_eval.evals._prompts import render_prompt  # noqa: E402
+from sgl_eval.evals._prompts import prompt_media_config, render_prompt  # noqa: E402
 from sgl_eval.evals._vision import build_user_content  # noqa: E402
 from sgl_eval.predictions import PredictionsWriter, sample_to_pred  # noqa: E402
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples  # noqa: E402
@@ -49,9 +49,13 @@ def _score_via_eval_mcq(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig, prompt_yaml: Path) -> SampleFn:
+    # Read once: the yaml is fixed for the run, and parsing it per sample would
+    # put a file read on every request.
+    image_position = prompt_media_config(prompt_yaml)["image_position"]
+
     def sample_fn(ex: Example, _rep_idx: int) -> Sample:
         prompt_text = render_prompt(prompt_yaml, problem=ex.inputs["problem"])
-        content = build_user_content(prompt_text, ex.media)
+        content = build_user_content(prompt_text, ex.media, image_position=image_position)
         return sampler([{"role": "user", "content": content}], gen)
 
     return sample_fn

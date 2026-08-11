@@ -96,6 +96,46 @@ def test_two_placeholders_two_images_in_order():
     assert [b["type"] for b in content] == ["text", "image_url", "text", "image_url", "text"]
 
 
+def test_image_position_before_puts_image_ahead_of_text():
+    """Screenshot-style benchmarks (mmmu_pro_vision) carry the question inside
+    the image; the text is only an answer-format instruction."""
+    media = [MediaItem(kind="image", data=b"i", mime="image/png")]
+    content = build_user_content("answer format...", media, image_position="before")
+    assert [b["type"] for b in content] == ["image_url", "text"]
+    assert content[1]["text"] == "answer format..."
+
+
+def test_image_position_before_with_multiple_images():
+    media = [
+        MediaItem(kind="image", data=b"a", mime="image/png"),
+        MediaItem(kind="image", data=b"b", mime="image/png"),
+    ]
+    content = build_user_content("q", media, image_position="before")
+    assert [b["type"] for b in content] == ["image_url", "image_url", "text"]
+
+
+def test_placeholder_wins_over_image_position_before():
+    """An explicit ``[image]`` marker is a per-question position and must not be
+    overridden by the yaml-level default."""
+    media = [MediaItem(kind="image", data=b"i", mime="image/png")]
+    content = build_user_content("x [image] y", media, image_position="before")
+    assert [b["type"] for b in content] == ["text", "image_url", "text"]
+
+
+def test_image_position_before_still_appends_video():
+    media = [
+        MediaItem(kind="image", data=b"i", mime="image/png"),
+        MediaItem(kind="video", url="https://x/v.mp4"),
+    ]
+    content = build_user_content("q", media, image_position="before")
+    assert [b["type"] for b in content] == ["image_url", "text", "video_url"]
+
+
+def test_image_position_defaults_to_after():
+    media = [MediaItem(kind="image", data=b"i", mime="image/png")]
+    assert [b["type"] for b in build_user_content("q", media)] == ["text", "image_url"]
+
+
 def test_more_placeholders_than_images_inserts_missing_marker():
     """A ``[image]`` placeholder with no matching image becomes a visible
     ``[image missing]`` text block, not a silent drop."""

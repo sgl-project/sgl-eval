@@ -23,6 +23,19 @@ def vendored_prompt(name: str) -> Path:
     return _VENDORED_PROMPT_DIR / f"{name}.yaml"
 
 
+def prompt_media_config(yaml_path: Path) -> dict:
+    """Media placement keys from a VLM prompt yaml (``image_position``).
+
+    Upstream's VLM configs carry these alongside ``user``; ``render_prompt``
+    only consumes the template, so a caller that builds multimodal content
+    reads placement from here. ``image_field`` is upstream's jsonl column
+    name, which the loader has already resolved into ``Example.media``, so
+    it is deliberately not surfaced.
+    """
+    cfg = yaml.safe_load(yaml_path.read_text())
+    return {"image_position": cfg.get("image_position", "after")}
+
+
 def render_prompt(
     yaml_path: Path,
     problem: str,
