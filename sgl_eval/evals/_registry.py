@@ -11,8 +11,7 @@ no new module. Each entry encodes only the things that genuinely differ:
   the sidecar directory ``save_data`` writes beside its jsonl, and the jsonl
   column holding each row's path into it.
 - ``sample_seed``: turns ``--num-examples N`` into a seeded sample of the whole
-  split. Needed when the prepared jsonl is grouped rather than shuffled, since
-  the default keeps the first N rows.
+  split, for benchmarks whose jsonl is grouped rather than shuffled.
 - ``thinking``: whether to set ``chat_template_kwargs={"thinking": True}``
   by default. True for reasoning benchmarks (aime / gpqa); off otherwise.
 - ``default_n_repeats``: per-example repeat count (sgl-eval choice; NS
@@ -88,10 +87,8 @@ _TABLE = [
         "description": "AIME 2026 (30 problems, integer answers).",
     },
     {
-        # The Hendrycks tar is one CSV per subject, so the prepared jsonl is
-        # ordered by subject -- the first 60 of its 14042 rows are all one
-        # category. `sample_seed` makes `--num-examples N` a seeded sample of
-        # the whole split instead of its first N rows.
+        # One CSV per subject in the Hendrycks tar, so the first 60 of 14042
+        # rows are all one category -- `--num-examples` has to sample.
         "name": "mmlu",
         "loader": "prepare",
         "save_args": ("test",),

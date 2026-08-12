@@ -15,12 +15,9 @@ A multimodal **prepare** benchmark also writes a media sidecar dir beside its
 jsonl and references it by relative path (mmmu_pro_vision -> ``images/`` +
 ``image_path``); see ``load_via_prepare``.
 
-``--num-examples N`` keeps the first N rows, which is upstream's own behavior
-(``max_samples`` in its generation config, documented there as a debugging
-aid). That is wrong for a dataset stored grouped rather than shuffled -- mmlu
-comes out of the Hendrycks tar as one CSV per subject, so the first 60 rows are
-all one category. Such a benchmark declares ``sample_seed`` and gets a
-seeded sample of the whole split instead; see ``load_via_prepare``.
+``--num-examples N`` keeps the first N rows, matching upstream's ``max_samples``.
+A benchmark whose jsonl is grouped rather than shuffled declares ``sample_seed``
+instead, or a small N scores one group only.
 """
 
 from __future__ import annotations
@@ -80,17 +77,9 @@ def _row_media(row: dict, media_field: str, base_dir: Path) -> List[MediaItem]:
 def _select_rows(
     path: Path, num_examples: Optional[int], sample_seed: Optional[int]
 ) -> List[Tuple[int, dict]]:
-    """Rows to score, each paired with its line number in the full split.
-
-    Without ``sample_seed`` this stops reading at ``num_examples`` -- a
-    long-context split (ruler2 rows are ~500KB) must not be pulled into memory
-    whole just to take the first few. Sampling needs the full row list, so it
-    is opt-in per benchmark.
-
-    The line number, not the position after sampling, is what ``_row_to_example``
-    turns into a fallback id, so a row keeps the same id at every
-    ``num_examples``.
-    """
+    """Rows to score, paired with their line number so ids stay stable across
+    ``num_examples``. Without ``sample_seed`` reading stops early -- sampling
+    needs every row, which a ~500KB-per-row split cannot afford."""
     rows: List[Tuple[int, dict]] = []
     with path.open("rt", encoding="utf-8") as f:
         for i, line in enumerate(f):
@@ -110,8 +99,7 @@ def _read_jsonl(
     media_base: Optional[Path] = None,
     sample_seed: Optional[int] = None,
 ) -> List[Example]:
-    # Media is read after selection so a sampled run only loads the files it
-    # scores.
+    # Media loads after selection, so a sampled run only reads what it scores.
     return [
         _row_to_example(
             row, i, name, _row_media(row, media_field, media_base) if media_field else []
@@ -177,9 +165,7 @@ def load_via_prepare(
     dir together so the relative paths keep resolving.
 
     ``sample_seed`` makes ``num_examples`` a seeded sample of the whole split
-    rather than its first N rows. Declare it when the prepared jsonl is grouped
-    (mmlu is one CSV per subject), or a small ``num_examples`` silently scores a
-    single category.
+    rather than its first N rows.
     """
     save_kwargs = save_kwargs or {}
     output_basename = f"{save_args[0]}.jsonl"
