@@ -10,6 +10,9 @@ no new module. Each entry encodes only the things that genuinely differ:
 - ``media_dir`` / ``media_field``: multimodal ``prepare`` benchmarks only --
   the sidecar directory ``save_data`` writes beside its jsonl, and the jsonl
   column holding each row's path into it.
+- ``sample_seed``: turns ``--num-examples N`` into a seeded sample of the whole
+  split. Needed when the prepared jsonl is grouped rather than shuffled, since
+  the default keeps the first N rows.
 - ``thinking``: whether to set ``chat_template_kwargs={"thinking": True}``
   by default. True for reasoning benchmarks (aime / gpqa); off otherwise.
 - ``default_n_repeats``: per-example repeat count (sgl-eval choice; NS
@@ -85,9 +88,14 @@ _TABLE = [
         "description": "AIME 2026 (30 problems, integer answers).",
     },
     {
+        # The Hendrycks tar is one CSV per subject, so the prepared jsonl is
+        # ordered by subject -- the first 60 of its 14042 rows are all one
+        # category. `sample_seed` makes `--num-examples N` a seeded sample of
+        # the whole split instead of its first N rows.
         "name": "mmlu",
         "loader": "prepare",
         "save_args": ("test",),
+        "sample_seed": 0,
         "thinking": False,
         "default_n_repeats": 1,
         "description": "MMLU all-subjects multichoice (mean accuracy).",
@@ -194,6 +202,7 @@ def _build_loader(entry: dict):
             entry.get("save_kwargs", {}),
             media_dir=entry.get("media_dir"),
             media_field=entry.get("media_field"),
+            sample_seed=entry.get("sample_seed"),
         )
     raise ValueError(f"unknown loader kind: {kind!r}")
 
