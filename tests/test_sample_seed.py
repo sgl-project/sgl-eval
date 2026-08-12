@@ -103,9 +103,7 @@ def test_default_path_stops_reading_early(tmp_path, monkeypatch):
     _write_grouped(path)
     parsed = []
     real_loads = json.loads
-    monkeypatch.setattr(
-        json, "loads", lambda s, **kw: (parsed.append(1), real_loads(s, **kw))[1]
-    )
+    monkeypatch.setattr(json, "loads", lambda s, **kw: (parsed.append(1), real_loads(s, **kw))[1])
     _loader._read_jsonl(path, "b", 5)
     assert len(parsed) == 5
 

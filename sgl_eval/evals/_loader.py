@@ -197,9 +197,7 @@ def load_via_prepare(
             # _vendored -- the sidecar has to come out with the jsonl.
             if media_dir:
                 _move_tree(vendored_dir / media_dir, cache_dir / media_dir)
-        return _read_jsonl(
-            cache_path, name, num_examples, media_field, cache_dir, sample_seed
-        )
+        return _read_jsonl(cache_path, name, num_examples, media_field, cache_dir, sample_seed)
 
     return loader
 
