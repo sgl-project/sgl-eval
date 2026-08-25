@@ -8,3 +8,26 @@ models:
       max_tokens: 200000
       thinking: true
       reasoning_effort: max
+  deepseek-ai/DeepSeek-V4-Pro-0813:
+    model: deepseek-ai/DeepSeek-V4-Pro-0813
+    sampling:
+      temperature: 1.0
+      top_p: 0.95
+      max_tokens: 400000
+      thinking: true
+      reasoning_effort: max
+  moonshotai/Kimi-K3:
+    model: moonshotai/Kimi-K3
+    sampling:
+      temperature: 1.0
+      top_p: 0.95
+      max_tokens: 300000
+      thinking: true
+      reasoning_effort: max
+  zai-org/GLM-5.2-FP8:
+    model: zai-org/GLM-5.2-FP8
+    sampling:
+      temperature: 1.0
+      top_p: 0.95
+      max_tokens: 200000
+      thinking: true
