@@ -26,19 +26,27 @@ instead, or a small N scores one group only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
+import os
 import random
 import shutil
 import sys
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import httpx
 
 from sgl_eval import VENDORED_NS_ROOT
 from sgl_eval.types import Example, MediaItem
 
 _CACHE_ROOT = Path.home() / ".cache" / "sgl_eval"
 _VENDORED_DATASET_ROOT = VENDORED_NS_ROOT / "dataset"
+_DOWNLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
+_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 _MIME_BY_SUFFIX = {
     ".png": "image/png",
@@ -155,12 +163,14 @@ def load_from_path(path: str) -> Callable[[Optional[int]], List[Example]]:
 
 def load_via_prepare(
     name: str,
-    save_args: List[Any],
+    save_args: Sequence[Any],
     save_kwargs: Optional[Dict[str, Any]] = None,
     media_dir: Optional[str] = None,
     media_field: Optional[str] = None,
     sample_seed: Optional[int] = None,
     argparse_main: bool = False,
+    archive_urls: Optional[Sequence[str]] = None,
+    archive_sha256: Optional[str] = None,
 ) -> Callable[[Optional[int]], List[Example]]:
     """Loader that runs vendored ``<name>/prepare.py`` once and caches the
     resulting JSONL.
@@ -171,8 +181,22 @@ def load_via_prepare(
 
     ``sample_seed`` makes ``num_examples`` a seeded sample of the whole split
     rather than its first N rows.
+
+    ``archive_urls`` provides ordered mirrors for a prepare module whose
+    ``save_data`` downloads one archive through its module-level ``URL``.
+    sgl-eval downloads and verifies the archive first, then lets the vendored
+    transformation consume the local copy unchanged.
     """
     save_kwargs = save_kwargs or {}
+    archive_urls = tuple(archive_urls or ())
+    if bool(archive_urls) != bool(archive_sha256):
+        raise ValueError("archive_urls and archive_sha256 must be configured together")
+    if archive_urls and argparse_main:
+        raise ValueError("archive fallback and argparse_main are mutually exclusive")
+    if archive_sha256 is not None:
+        archive_sha256 = archive_sha256.lower()
+        if len(archive_sha256) != 64 or any(c not in "0123456789abcdef" for c in archive_sha256):
+            raise ValueError("archive_sha256 must be a 64-character hexadecimal digest")
     output_basename = f"{save_args[0]}.jsonl"
 
     def loader(num_examples: Optional[int]) -> List[Example]:
@@ -181,7 +205,16 @@ def load_via_prepare(
         if not cache_path.exists():
             mod = importlib.import_module(f"sgl_eval._vendored.nemo_skills.dataset.{name}.prepare")
             vendored_dir = Path(mod.__file__).resolve().parent
-            if argparse_main:
+            if archive_urls:
+                _save_data_from_verified_archive(
+                    mod,
+                    save_args,
+                    save_kwargs,
+                    archive_urls,
+                    archive_sha256,
+                    cache_dir,
+                )
+            elif argparse_main:
                 mod.main(argparse.Namespace(split=save_args[0], **save_kwargs))
             else:
                 mod.save_data(*save_args, **save_kwargs)
@@ -194,6 +227,84 @@ def load_via_prepare(
         return _read_jsonl(cache_path, name, num_examples, media_field, cache_dir, sample_seed)
 
     return loader
+
+
+def _save_data_from_verified_archive(
+    mod: Any,
+    save_args: Sequence[Any],
+    save_kwargs: Dict[str, Any],
+    archive_urls: Sequence[str],
+    archive_sha256: str,
+    cache_dir: Path,
+) -> None:
+    """Run a vendored prepare transform against a verified local archive."""
+    if not hasattr(mod, "URL"):
+        raise RuntimeError("archive fallback requires the prepare module to define URL")
+    original_url = mod.URL
+    archive_path = _download_verified_archive(
+        archive_urls,
+        expected_sha256=archive_sha256,
+        directory=cache_dir,
+    )
+    try:
+        try:
+            mod.URL = archive_path.as_uri()
+            mod.save_data(*save_args, **save_kwargs)
+        finally:
+            mod.URL = original_url
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+
+def _download_verified_archive(
+    urls: Sequence[str],
+    expected_sha256: str,
+    directory: Path,
+) -> Path:
+    """Download the first reachable archive whose SHA-256 matches."""
+    directory.mkdir(parents=True, exist_ok=True)
+    failures: list[str] = []
+
+    for url in urls:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=".sgl-eval-archive-",
+            suffix=".tmp",
+            dir=directory,
+        )
+        os.close(fd)
+        temp_path = Path(temp_name)
+        digest = hashlib.sha256()
+        verified = False
+        try:
+            with (
+                temp_path.open("wb") as temp_file,
+                httpx.stream(
+                    "GET",
+                    url,
+                    follow_redirects=True,
+                    timeout=_DOWNLOAD_TIMEOUT,
+                ) as response,
+            ):
+                response.raise_for_status()
+                for chunk in response.iter_bytes(_DOWNLOAD_CHUNK_BYTES):
+                    temp_file.write(chunk)
+                    digest.update(chunk)
+
+            actual_sha256 = digest.hexdigest()
+            if actual_sha256 != expected_sha256:
+                raise ValueError(
+                    f"SHA-256 mismatch (expected {expected_sha256}, got {actual_sha256})"
+                )
+            verified = True
+            return temp_path
+        except (OSError, httpx.HTTPError, ValueError) as exc:
+            failures.append(f"{url}: {type(exc).__name__}: {exc}")
+        finally:
+            if not verified:
+                temp_path.unlink(missing_ok=True)
+
+    details = "\n".join(f"- {failure}" for failure in failures)
+    raise RuntimeError(f"Unable to download a verified dataset archive:\n{details}")
 
 
 def _move_tree(src: Path, dst: Path) -> None:

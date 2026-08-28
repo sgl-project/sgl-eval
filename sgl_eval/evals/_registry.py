@@ -9,6 +9,8 @@ no new module. Each entry encodes only the things that genuinely differ:
   ``loader == "prepare"``.
 - ``argparse_main``: upstream's prepare.py exposes an argparse ``main(args)``
   rather than ``save_data``; ``save_args[0]`` becomes ``args.split``.
+- ``archive_urls`` / ``archive_sha256``: ordered mirrors and the required
+  digest when sgl-eval must prefetch a prepare module's source archive.
 - ``media_dir`` / ``media_field``: multimodal ``prepare`` benchmarks only --
   the sidecar directory ``save_data`` writes beside its jsonl, and the jsonl
   column holding each row's path into it.
@@ -55,6 +57,10 @@ from sgl_eval.predictions import PredSchema
 from sgl_eval.registry import EvalSpec, register
 from sgl_eval.types import GenConfig
 
+_MMLU_ARCHIVE_REVISION = "c30699e8356da336a370243923dbaf21066bb9fe"
+# Git LFS object digest for data.tar at the pinned Hugging Face revision.
+_MMLU_ARCHIVE_SHA256 = "bec563ba4bac1d6aaf04141cd7d1605d7a5ca833e38f994051e818489592989b"
+
 _TABLE = [
     {
         "name": "gsm8k",
@@ -92,6 +98,11 @@ _TABLE = [
         "loader": "prepare",
         "save_args": ("test",),
         "sample_seed": 0,
+        "archive_urls": (
+            "https://people.eecs.berkeley.edu/~hendrycks/data.tar",
+            f"https://huggingface.co/datasets/cais/mmlu/resolve/{_MMLU_ARCHIVE_REVISION}/data.tar",
+        ),
+        "archive_sha256": _MMLU_ARCHIVE_SHA256,
         "thinking": False,
         "default_n_repeats": 1,
         "description": "MMLU all-subjects multichoice (mean accuracy).",
@@ -206,6 +217,8 @@ def _build_loader(entry: dict):
             media_field=entry.get("media_field"),
             sample_seed=entry.get("sample_seed"),
             argparse_main=entry.get("argparse_main", False),
+            archive_urls=entry.get("archive_urls"),
+            archive_sha256=entry.get("archive_sha256"),
         )
     raise ValueError(f"unknown loader kind: {kind!r}")
 
