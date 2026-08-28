@@ -261,18 +261,15 @@ def apply_to_gen(
     p = preset.sampling if preset else None
     mp = model_preset.sampling if model_preset else None
     chat_template_kwargs = dict(default.chat_template_kwargs or {})
-    thinking = pick(
-        args.thinking,
-        p.thinking if p else None,
-        mp.thinking if mp else None,
-    )
-    if thinking is not None:
-        chat_template_kwargs["thinking"] = thinking
-    if mp and mp.chat_template_kwargs:
-        chat_template_kwargs.update(mp.chat_template_kwargs)
-    if p and p.chat_template_kwargs:
-        chat_template_kwargs.update(p.chat_template_kwargs)
-    chat_template_kwargs.update(parse_chat_template_kwargs(args))
+    for layer_thinking, layer_kwargs in (
+        (mp.thinking, mp.chat_template_kwargs) if mp else (None, None),
+        (p.thinking, p.chat_template_kwargs) if p else (None, None),
+        (args.thinking, parse_chat_template_kwargs(args)),
+    ):
+        if layer_thinking is not None:
+            chat_template_kwargs["thinking"] = layer_thinking
+        if layer_kwargs:
+            chat_template_kwargs.update(layer_kwargs)
     return GenConfig(
         temperature=pick(
             args.temperature,
