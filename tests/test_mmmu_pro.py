@@ -222,7 +222,19 @@ def test_mmmu_pro_prompt_packaged():
     run time. A missing file crashes the first MMMU-Pro run, not import."""
     from sgl_eval.evals._prompts import resolve_prompt
 
-    assert resolve_prompt("mcq-10choices").exists()
+    assert resolve_prompt("mmmu-pro-cot").exists()
+
+
+def test_mmmu_pro_prompt_is_not_shadowed_by_the_vendored_10choice():
+    """`mcq-10choices` is MMLU-Pro's vendored prompt and hardcodes A-J;
+    MMMU-Pro ships 4-10 options per question and needs its own. Since
+    ``resolve_prompt`` prefers vendored, sharing the basename would silently
+    swap MMMU-Pro's prompt for MMLU-Pro's."""
+    from sgl_eval.evals._prompts import resolve_prompt
+
+    assert resolve_prompt("mmmu-pro-cot") != resolve_prompt("mcq-10choices")
+    mmmu = resolve_prompt("mmmu-pro-cot").read_text()
+    assert "$LETTER" in mmmu and "A/B/C/D/E/F/G/H/I/J" not in mmmu
 
 
 def test_max_tokens_not_pinned_for_any_benchmark():

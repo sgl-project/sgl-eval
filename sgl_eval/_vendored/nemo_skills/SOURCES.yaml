@@ -115,6 +115,15 @@ files:
     dst: dataset/gpqa/__init__.py
   - src: nemo_skills/dataset/gpqa/prepare.py
     dst: dataset/gpqa/prepare.py
+  # `dst` de-hyphenates because `_resolve_upstream_metadata` imports this dir
+  # as a Python module. Unlike gpqa/mmlu, this prepare.py exposes only an
+  # argparse `main(args)`, which the registry row flags with `argparse_main`.
+  # `subsets/` is deliberately absent: it backs upstream's `10pct_opt_v1`
+  # split, and sgl-eval evaluates `test`.
+  - src: nemo_skills/dataset/mmlu-pro/__init__.py
+    dst: dataset/mmlu_pro/__init__.py
+  - src: nemo_skills/dataset/mmlu-pro/prepare.py
+    dst: dataset/mmlu_pro/prepare.py
   # MMMU-Pro `vision` config (see `_registry.py` for what it evaluates).
   # `dst` de-hyphenates because `_resolve_upstream_metadata` imports this dir
   # as a Python module; it says `vision` to stay distinct from the `mmmu_pro`
@@ -164,6 +173,10 @@ files:
     dst: prompts/matharena-aime.yaml
   - src: nemo_skills/prompt/config/eval/aai/mcq-4choices-boxed.yaml
     dst: prompts/mcq-4choices-boxed.yaml
+  # MMLU-Pro's default. Hardcodes A-J, so it is not interchangeable with
+  # sgl-eval's own `mmmu-pro-cot` -- see the note there.
+  - src: nemo_skills/prompt/config/eval/aai/mcq-10choices.yaml
+    dst: prompts/mcq-10choices.yaml
   # RULER2's ++prompt_config. Pure passthrough (`user: "{question}"`) -- the
   # long context is already assembled by the prepare scripts.
   - src: nemo_skills/prompt/config/generic/default.yaml
