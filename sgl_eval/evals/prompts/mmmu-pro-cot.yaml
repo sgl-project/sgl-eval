@@ -1,5 +1,7 @@
 # sgl-eval prompt for MMMU-Pro (multimodal, variable-choice). SE-own
-# (NeMo-Skills upstream has no MMMU-Pro). Aligns with the official MMMU-Pro
+# (NeMo-Skills upstream has no MMMU-Pro). Named for the benchmark rather than
+# the option count, so it stays distinct from the vendored `mcq-10choices`,
+# which is MMLU-Pro's and does hardcode A-J. Aligns with the official MMMU-Pro
 # cot/standard prompt: "$LETTER ... one of the options" adapts to the
 # variable option count (MMMU-Pro ships 4-10 options per question) instead
 # of hardcoding A-J; "Think step by step" elicits CoT from reasoning models.

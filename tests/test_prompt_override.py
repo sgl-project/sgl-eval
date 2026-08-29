@@ -19,9 +19,9 @@ from sgl_eval.types import Example, GenConfig, Sample
 
 def test_resolve_prompt_prefers_vendored_then_se_own():
     assert resolve_prompt("math") == vendored_prompt("math")
-    # mcq-10choices is sgl-eval's own; upstream ships no such config.
-    assert not vendored_prompt("mcq-10choices").exists()
-    assert resolve_prompt("mcq-10choices") == _SE_PROMPT_DIR / "mcq-10choices.yaml"
+    # mmmu-pro-cot is sgl-eval's own; upstream ships no MMMU-Pro config.
+    assert not vendored_prompt("mmmu-pro-cot").exists()
+    assert resolve_prompt("mmmu-pro-cot") == _SE_PROMPT_DIR / "mmmu-pro-cot.yaml"
 
 
 def test_resolve_prompt_takes_a_path_verbatim(tmp_path):

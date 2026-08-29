@@ -7,6 +7,8 @@ no new module. Each entry encodes only the things that genuinely differ:
   (run vendored ``prepare.py:save_data``).
 - ``save_args`` / ``save_kwargs``: signature for ``save_data`` when
   ``loader == "prepare"``.
+- ``argparse_main``: upstream's prepare.py exposes an argparse ``main(args)``
+  rather than ``save_data``; ``save_args[0]`` becomes ``args.split``.
 - ``media_dir`` / ``media_field``: multimodal ``prepare`` benchmarks only --
   the sidecar directory ``save_data`` writes beside its jsonl, and the jsonl
   column holding each row's path into it.
@@ -104,13 +106,29 @@ _TABLE = [
         "description": "GPQA Diamond (graduate-level QA, pass@k + majority@k).",
     },
     {
+        # MMLU-Pro, not to be confused with `mmmu_pro` below -- one letter
+        # apart and adjacent in `sgl-eval list`, but a text 10-choice exam
+        # vs a multimodal one. Its prepare.py exposes only an argparse
+        # `main(args)`; every other prepare benchmark exposes save_data.
+        "name": "mmlu_pro",
+        "loader": "prepare",
+        "save_args": ("test",),
+        "argparse_main": True,
+        # 12032 rows ordered by category, so a small --num-examples would
+        # otherwise score one subject only.
+        "sample_seed": 0,
+        "thinking": False,
+        "default_n_repeats": 1,
+        "description": "MMLU-Pro (12032 questions, 10-choice, reasoning-heavy).",
+    },
+    {
         # SE-own: upstream ships MMMU-Pro's `vision` config only (registered
         # below as `mmmu_pro_vision`), not `standard (10 options)`. So
         # metrics_type + prompt + loader_fn bypass the vendored
         # dataset/__init__.py + prepare path.
         "name": "mmmu_pro",
         "metrics_type": "multichoice",
-        "prompt": "mcq-10choices",
+        "prompt": "mmmu-pro-cot",
         "loader_fn": lambda num_examples: load_mmmu_pro("test", num_examples),
         "thinking": False,
         "default_n_repeats": 1,
@@ -189,6 +207,7 @@ def _build_loader(entry: dict):
             media_dir=entry.get("media_dir"),
             media_field=entry.get("media_field"),
             sample_seed=entry.get("sample_seed"),
+            argparse_main=entry.get("argparse_main", False),
         )
     raise ValueError(f"unknown loader kind: {kind!r}")
 

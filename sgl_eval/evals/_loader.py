@@ -6,10 +6,13 @@ Two patterns are needed across the current benchmark set:
     ``test.txt`` jsonl beside ``prepare.py``). The vendored ``test.txt`` is
     read directly.
 
-  - **prepare**: data is downloaded by upstream's ``prepare.py:save_data``
-    (gsm8k from openai/grade-school-math, mmlu from Berkeley tar, gpqa from
-    HuggingFace). We invoke the vendored function once, move its output to
+  - **prepare**: data is downloaded by upstream's ``prepare.py`` (gsm8k from
+    openai/grade-school-math, mmlu from Berkeley tar, gpqa and mmlu_pro from
+    HuggingFace). We invoke it once, move its output to
     ``~/.cache/sgl_eval/<name>/``, and serve from cache on subsequent runs.
+    Upstream's entry point is not uniform -- most expose ``save_data(split,
+    ...)``, mmlu-pro only an argparse ``main(args)`` -- so ``argparse_main``
+    selects the call shape.
 
 A multimodal **prepare** benchmark also writes a media sidecar dir beside its
 jsonl and references it by relative path (mmmu_pro_vision -> ``images/`` +
@@ -22,6 +25,7 @@ instead, or a small N scores one group only.
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import json
 import random
@@ -156,9 +160,10 @@ def load_via_prepare(
     media_dir: Optional[str] = None,
     media_field: Optional[str] = None,
     sample_seed: Optional[int] = None,
+    argparse_main: bool = False,
 ) -> Callable[[Optional[int]], List[Example]]:
-    """Loader that runs vendored ``<name>/prepare.py:save_data`` once and
-    caches the resulting JSONL.
+    """Loader that runs vendored ``<name>/prepare.py`` once and caches the
+    resulting JSONL.
 
     ``media_dir`` is a sidecar dir ``save_data`` writes beside the jsonl;
     ``media_field`` is the jsonl column pointing into it. Both land in the cache
@@ -176,7 +181,10 @@ def load_via_prepare(
         if not cache_path.exists():
             mod = importlib.import_module(f"sgl_eval._vendored.nemo_skills.dataset.{name}.prepare")
             vendored_dir = Path(mod.__file__).resolve().parent
-            mod.save_data(*save_args, **save_kwargs)
+            if argparse_main:
+                mod.main(argparse.Namespace(split=save_args[0], **save_kwargs))
+            else:
+                mod.save_data(*save_args, **save_kwargs)
             cache_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(vendored_dir / output_basename), str(cache_path))
             # save_data's data_dir is `Path(__file__).parent`, i.e. inside

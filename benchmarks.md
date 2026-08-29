@@ -12,6 +12,7 @@ an endpoint. Most need nothing.
 | `gsm8k` | math | -- |
 | `aime24/25/26` | math | one per contest year, same shape |
 | `mmlu` | multichoice | -- |
+| `mmlu_pro` | multichoice | text 10-choice; **not** `mmmu_pro` -- [see below](#mmlu-pro-vs-mmmu-pro) |
 | `gpqa` | multichoice | Diamond split |
 | `mmmu_pro` | multichoice | VLM endpoint; MMMU-Pro `standard (10 options)` -- [see below](#mmmu-pro-variants) |
 | `mmmu_pro_vision` | multichoice | VLM endpoint; MMMU-Pro `vision` -- [see below](#mmmu-pro-variants) |
@@ -70,6 +71,26 @@ greedy.
 
 ---
 
+## MMLU-Pro vs MMMU-Pro
+
+Two unrelated benchmarks one letter apart, adjacent in `sgl-eval list`.
+
+| | `mmlu_pro` | `mmmu_pro` |
+|---|---|---|
+| dataset | TIGER-Lab/MMLU-Pro, 12032 text questions | MMMU-Pro, multimodal |
+| options | exactly 10, A-J | 4-10, varies per question |
+| endpoint | any chat endpoint | needs a VLM |
+| prompt | vendored `mcq-10choices`, enumerates A-J | sgl-eval's `mmmu-pro-cot`, `$LETTER` + CoT |
+
+The prompts are deliberately not shared: `resolve_prompt` prefers the vendored
+copy, so giving them one basename would silently hand MMMU-Pro a prompt that
+enumerates ten letters for a question that may have four.
+
+`mmlu_pro`'s split is ordered by subject, so it carries `sample_seed` -- a small
+`--num-examples` samples across subjects instead of scoring one of them.
+
+---
+
 ## MMMU-Pro variants
 
 MMMU-Pro ships several HuggingFace configs. Two are registered, and they are
@@ -81,7 +102,7 @@ MMMU-Pro ships several HuggingFace configs. Two are registered, and they are
 | question text | in the prompt | rendered into the screenshot |
 | options | up to 10, as text | in the screenshot (and echoed as text) |
 | images per question | `<image 1..7>`, placed inline | one screenshot, placed first |
-| prompt | sgl-eval's `mcq-10choices`, asks for CoT | vendored `vlm/mmmu-pro`, no CoT |
+| prompt | sgl-eval's `mmmu-pro-cot`, asks for CoT | vendored `vlm/mmmu-pro`, no CoT |
 
 `mmmu_pro_vision` is the one upstream NeMo-Skills ships, so it is the row to
 use when reproducing an NS number or an `ns eval --benchmarks=mmmu-pro` run.
