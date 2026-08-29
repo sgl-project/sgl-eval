@@ -156,6 +156,12 @@ files:
     dst: prompts/math.yaml
   - src: nemo_skills/prompt/config/eval/aai/mcq-4choices.yaml
     dst: prompts/mcq-4choices.yaml
+  # Not a default for any benchmark -- reachable only via `run --prompt
+  # matharena-aime`. Published AIME numbers are often produced with this
+  # phrasing (it states the 0-999 integer range, which `generic/math` does
+  # not), so a run reproducing one needs it available.
+  - src: nemo_skills/prompt/config/eval/matharena/aime.yaml
+    dst: prompts/matharena-aime.yaml
   - src: nemo_skills/prompt/config/eval/aai/mcq-4choices-boxed.yaml
     dst: prompts/mcq-4choices-boxed.yaml
   # RULER2's ++prompt_config. Pure passthrough (`user: "{question}"`) -- the

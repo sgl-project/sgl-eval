@@ -121,6 +121,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to NS-shape jsonl ({id?, problem, expected_answer}); "
         "replaces the vendored dataset for this run",
     )
+    p_run.add_argument(
+        "--prompt",
+        default=None,
+        metavar="NAME_OR_PATH",
+        help="prompt yaml to wrap each question in, overriding the benchmark's "
+        "own (e.g. matharena-aime for AIME's MathArena phrasing). A bare name "
+        "resolves against the vendored NeMo-Skills prompts then sgl-eval's own; "
+        "a path or *.yaml is read as a file. Changes what the model is asked, so "
+        "scores are not comparable across prompts -- the choice is recorded in "
+        "metrics.json.",
+    )
     p_run.set_defaults(func=cmd_run, dump_predictions=True)
 
     # Benchmarks contribute their own options, so argparse -- not a hand-rolled

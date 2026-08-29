@@ -44,8 +44,9 @@ def test_aime_bundled_data_loads(name):
 
 def test_prompt_render_no_few_shot():
     from sgl_eval.evals._math import render_math_prompt
+    from sgl_eval.evals._prompts import vendored_prompt
 
-    rendered = render_math_prompt("What is 2+2?")
+    rendered = render_math_prompt(vendored_prompt("math"), "What is 2+2?")
     assert "Solve the following math problem" in rendered
     assert "\\boxed{}" in rendered
     assert "What is 2+2?" in rendered
@@ -54,8 +55,10 @@ def test_prompt_render_no_few_shot():
 
 def test_prompt_render_with_few_shot():
     from sgl_eval.evals._math import render_math_prompt
+    from sgl_eval.evals._prompts import vendored_prompt
 
     rendered = render_math_prompt(
+        vendored_prompt("math"),
         "Find x.",
         few_shot_examples=[{"problem": "1+1=?", "solution": "\\boxed{2}"}],
     )

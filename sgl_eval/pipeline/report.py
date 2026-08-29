@@ -68,6 +68,10 @@ def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
     # these -- without them a metrics.json cannot say which setup it scored.
     if ctx.bench_args:
         meta["bench_args"] = dict(ctx.bench_args)
+    # Only on override: a different prompt is a different question, so a score
+    # carrying this key is not comparable with one that doesn't.
+    if ctx.prompt_yaml is not None:
+        meta["prompt"] = {"spec": ctx.args.prompt, "path": str(ctx.prompt_yaml)}
     model_preset_block = make_model_preset_meta_block(ctx.inputs.model_preset)
     if model_preset_block:
         meta["model_preset"] = model_preset_block

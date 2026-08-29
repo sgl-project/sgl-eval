@@ -16,11 +16,30 @@ import yaml
 _VENDORED_PROMPT_DIR = (
     Path(__file__).resolve().parent.parent / "_vendored" / "nemo_skills" / "prompts"
 )
+_SE_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
 
 def vendored_prompt(name: str) -> Path:
     """Return the path to a vendored prompt yaml by basename (no extension)."""
     return _VENDORED_PROMPT_DIR / f"{name}.yaml"
+
+
+def resolve_prompt(spec: str) -> Path:
+    """Resolve a prompt spec to a yaml path.
+
+    A bare basename resolves against the vendored NeMo-Skills prompts first,
+    then sgl-eval's own ``prompts/``. Anything carrying a path separator or a
+    ``.yaml`` suffix is taken as a filesystem path instead, so a caller can
+    point at a prompt this repo does not ship. Existence is not checked here:
+    registration resolves every benchmark's default at import time, and a
+    missing file should surface where it is read, not where it is named.
+    """
+    if "/" in spec or spec.endswith(".yaml"):
+        return Path(spec).expanduser()
+    vendored = vendored_prompt(spec)
+    if vendored.exists():
+        return vendored
+    return _SE_PROMPT_DIR / f"{spec}.yaml"
 
 
 def prompt_media_config(yaml_path: Path) -> dict:
