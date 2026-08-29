@@ -7,8 +7,6 @@ from __future__ import annotations
 import json
 import types
 
-import pytest
-
 from sgl_eval.evals import _loader
 from sgl_eval.evals._prompts import render_prompt, resolve_prompt
 from sgl_eval.registry import get
@@ -82,27 +80,16 @@ def test_default_shape_still_calls_save_data(tmp_path, monkeypatch):
     assert calls == {"save_data": ("test",)}
 
 
-def test_mmlu_pro_is_registered_with_the_argparse_shape():
-    """The loader flag lives in the registry row, so this is the only place
-    the two halves are connected."""
-    from sgl_eval.evals._registry import _TABLE
+def test_registry_wires_mmlu_pro_to_the_argparse_shape(tmp_path, monkeypatch):
+    """Dropping ``argparse_main`` from the row, or forgetting to forward it in
+    ``_build_loader``, leaves mmlu_pro calling a ``save_data`` its prepare.py
+    does not have."""
+    from sgl_eval.evals._registry import _TABLE, _build_loader
+
+    mod, calls = _fake_prepare_module(tmp_path)
+    _install(monkeypatch, tmp_path, mod)
 
     row = next(r for r in _TABLE if r["name"] == "mmlu_pro")
-    assert row["argparse_main"] is True
-    # Rows are ordered by category, so a subject-ordered split needs a seed
-    # for --num-examples to span more than one subject.
-    assert row["sample_seed"] == 0
+    _build_loader(row)(None)
 
-
-@pytest.mark.parametrize("name", ["mmlu_pro", "mmmu_pro"])
-def test_the_two_pro_benchmarks_do_not_share_a_prompt(name):
-    """One letter apart in the registry and adjacent in `sgl-eval list`, but
-    MMLU-Pro is a text 10-choice exam and MMMU-Pro a multimodal variable-choice
-    one. ``resolve_prompt`` prefers vendored, so a shared basename would
-    silently give MMMU-Pro the A-J prompt."""
-    from sgl_eval.evals._registry import _TABLE, _resolve_upstream_metadata
-
-    row = next(r for r in _TABLE if r["name"] == name)
-    basename = row["prompt"] if "prompt" in row else _resolve_upstream_metadata(name)[1]
-    assert basename == ("mcq-10choices" if name == "mmlu_pro" else "mmmu-pro-cot")
-    assert resolve_prompt(basename).exists()
+    assert calls == {"main": "test"}

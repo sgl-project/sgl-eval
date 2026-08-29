@@ -107,9 +107,7 @@ _TABLE = [
     },
     {
         # MMLU-Pro, not to be confused with `mmmu_pro` below -- one letter
-        # apart and adjacent in `sgl-eval list`, but a text 10-choice exam
-        # vs a multimodal one. Its prepare.py exposes only an argparse
-        # `main(args)`; every other prepare benchmark exposes save_data.
+        # apart and adjacent in `sgl-eval list`, but a text 10-choice exam.
         "name": "mmlu_pro",
         "loader": "prepare",
         "save_args": ("test",),

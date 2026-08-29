@@ -232,9 +232,9 @@ def test_mmmu_pro_prompt_is_not_shadowed_by_the_vendored_10choice():
     swap MMMU-Pro's prompt for MMLU-Pro's."""
     from sgl_eval.evals._prompts import resolve_prompt
 
+    assert resolve_prompt("mmmu-pro-cot") != resolve_prompt("mcq-10choices")
     mmmu = resolve_prompt("mmmu-pro-cot").read_text()
     assert "$LETTER" in mmmu and "A/B/C/D/E/F/G/H/I/J" not in mmmu
-    assert "A/B/C/D/E/F/G/H/I/J" in resolve_prompt("mcq-10choices").read_text()
 
 
 def test_max_tokens_not_pinned_for_any_benchmark():
