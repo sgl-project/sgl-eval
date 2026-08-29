@@ -2,9 +2,7 @@
 
 A benchmark's prompt is part of what it measures -- ``generic/math`` and
 ``eval/matharena/aime`` ask an AIME question differently, so their scores are
-not comparable. These tests pin that the override reaches the sampler, that a
-bad spec fails before any request goes out, and that the choice lands in
-``metrics.json``.
+not comparable.
 """
 
 from __future__ import annotations

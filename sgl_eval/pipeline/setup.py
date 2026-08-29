@@ -82,8 +82,7 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
 
 
 def _resolve_prompt_override(spec: Optional[str]) -> Optional[Path]:
-    """Resolve ``--prompt`` up front so a typo fails before the first request
-    rather than on the first render, after the server is already loaded."""
+    """Resolve up front so a typo fails before the server is loaded, not at first render."""
     if spec is None:
         return None
     path = resolve_prompt(spec)

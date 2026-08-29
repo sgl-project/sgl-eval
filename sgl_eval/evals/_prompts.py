@@ -27,12 +27,9 @@ def vendored_prompt(name: str) -> Path:
 def resolve_prompt(spec: str) -> Path:
     """Resolve a prompt spec to a yaml path.
 
-    A bare basename resolves against the vendored NeMo-Skills prompts first,
-    then sgl-eval's own ``prompts/``. Anything carrying a path separator or a
-    ``.yaml`` suffix is taken as a filesystem path instead, so a caller can
-    point at a prompt this repo does not ship. Existence is not checked here:
-    registration resolves every benchmark's default at import time, and a
-    missing file should surface where it is read, not where it is named.
+    The path branch exists so a caller can point at a prompt this repo does not
+    ship. Existence is deliberately not checked: registration resolves every
+    benchmark's default at import time, so a raise here would fail at import.
     """
     if "/" in spec or spec.endswith(".yaml"):
         return Path(spec).expanduser()
