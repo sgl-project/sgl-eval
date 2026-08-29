@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from sgl_eval.evals._loader import load_from_path
+from sgl_eval.evals._prompts import resolve_prompt
 from sgl_eval.predictions import PredictionsWriter
 from sgl_eval.preset import ResolvedRunInputs, resolve_run_inputs
 from sgl_eval.registry import EvalSpec, get
@@ -34,6 +35,8 @@ class RunContext:
     args: argparse.Namespace
     load_examples: Optional[Callable[[Optional[int]], List[Example]]]
     bench_args: Dict[str, Any]
+    # None means "the benchmark's registered prompt"; set only by --prompt.
+    prompt_yaml: Optional[Path]
     _prev_sigint_handler: Any
 
 
@@ -60,6 +63,7 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
     load_examples = load_from_path(args.from_dataset) if args.from_dataset else None
 
     num_threads = args.num_threads if args.num_threads is not None else spec.default_num_threads
+    prompt_yaml = _resolve_prompt_override(getattr(args, "prompt", None))
 
     return RunContext(
         inputs=inputs,
@@ -72,8 +76,19 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
         args=args,
         load_examples=load_examples,
         bench_args=_collect_bench_args(args, spec.name),
+        prompt_yaml=prompt_yaml,
         _prev_sigint_handler=prev_sigint,
     )
+
+
+def _resolve_prompt_override(spec: Optional[str]) -> Optional[Path]:
+    """Resolve up front so a typo fails before the server is loaded, not at first render."""
+    if spec is None:
+        return None
+    path = resolve_prompt(spec)
+    if not path.exists():
+        raise FileNotFoundError(f"--prompt {spec!r}: no prompt yaml at {path}")
+    return path
 
 
 def _collect_bench_args(args: argparse.Namespace, name: str) -> Dict[str, Any]:

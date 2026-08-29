@@ -2,7 +2,7 @@
 evaluator.
 
 Mirrors NS pipeline stages:
-  - Stage 2a (prompt render): vendored ``prompts/math.yaml`` + ``str.format``.
+  - Stage 2a (prompt render): the benchmark's prompt yaml + ``str.format``.
   - Stage 2c (extract + score): vendored ``MathEvaluator.eval_single``.
   - Stage 4 (aggregate): vendored ``MathMetrics.update`` + ``get_metrics``.
 """
@@ -10,21 +10,22 @@ Mirrors NS pipeline stages:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sgl_eval._vendored.nemo_skills.evaluator.math import MathEvaluator
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
-from sgl_eval.evals._prompts import render_prompt, vendored_prompt
+from sgl_eval.evals._prompts import render_prompt
 from sgl_eval.predictions import PredictionsWriter, sample_to_pred
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples
 from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import Example, ExampleResult, GenConfig, RunResult, Sample
 
-_MATH_PROMPT_YAML = vendored_prompt("math")
 
-
-def render_math_prompt(problem: str, few_shot_examples: Optional[list] = None) -> str:
-    return render_prompt(_MATH_PROMPT_YAML, problem=problem, few_shot_examples=few_shot_examples)
+def render_math_prompt(
+    prompt_yaml: Path, problem: str, few_shot_examples: Optional[list] = None
+) -> str:
+    return render_prompt(prompt_yaml, problem=problem, few_shot_examples=few_shot_examples)
 
 
 def _eval_single_sync(evaluator: MathEvaluator, data_point: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,9 +34,9 @@ def _eval_single_sync(evaluator: MathEvaluator, data_point: Dict[str, Any]) -> D
     return asyncio.run(evaluator.eval_single(data_point))
 
 
-def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig) -> SampleFn:
+def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig, prompt_yaml: Path) -> SampleFn:
     def sample_fn(ex: Example, _rep_idx: int) -> Sample:
-        prompt = render_math_prompt(ex.inputs["problem"])
+        prompt = render_math_prompt(prompt_yaml, ex.inputs["problem"])
         return sampler([{"role": "user", "content": prompt}], gen)
 
     return sample_fn
@@ -101,12 +102,13 @@ def run_math_benchmark(
     num_examples: Optional[int],
     num_threads: int,
     load_examples: Callable[[Optional[int]], List[Example]],
+    prompt_yaml: Path,
     evaluator_config: Optional[Dict[str, Any]] = None,
     predictions_writer: Optional[PredictionsWriter] = None,
 ) -> RunResult:
     examples = load_examples(num_examples)
     evaluator = MathEvaluator(config=evaluator_config or {})
-    sample_fn = make_sample_fn(sampler, gen)
+    sample_fn = make_sample_fn(sampler, gen, prompt_yaml)
     score_one_fn = make_score_one_fn(evaluator)
     aggregator = (
         (lambda results: aggregate_with_math_metrics(results, n_repeats)) if n_repeats > 1 else None

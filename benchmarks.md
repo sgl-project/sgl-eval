@@ -30,10 +30,34 @@ Sampling lines up with NS's `InferenceConfig` field for field, including
 to the served model's `generation_config.json`, which would otherwise decide
 them.
 
-Two knobs differ.
+Three knobs differ.
 
 **`seed`**: NS sends `seed=0`, sgl-eval sends none unless asked. Add `--seed 0`
 to match. It has no effect at `temperature=0`.
+
+**`prompt_config`**: each benchmark uses upstream's default -- the one its
+vendored `dataset/<name>/__init__.py` names in `GENERATION_ARGS`. An NS run
+that passed `++prompt_config=<other>` asked a different question, so its score
+will not reproduce until you pass the same prompt. `--prompt <name-or-path>`
+does that: a bare name resolves against the vendored NS prompts and then
+sgl-eval's own `evals/prompts/`, and anything with a `/` or a `.yaml` suffix
+is read as a file, so a prompt this repo does not ship still works.
+
+The case that actually comes up is AIME. Published AIME numbers are frequently
+produced with `eval/matharena/aime`, which states that the answer is an integer
+between 0 and 999; `generic/math` -- the default -- does not. Vendored here as
+`matharena-aime`:
+
+```bash
+sgl-eval run aime25 --base-url http://localhost:30000/v1 \
+  --model <model> --n-repeats 32 --temperature 1.0 --top-p 0.95 \
+  --prompt matharena-aime
+```
+
+An overridden prompt is recorded under `prompt` in `metrics.json`; a score
+carrying that key is not comparable with one that does not. `ruler2` rejects
+the flag -- its prompt is a pure passthrough and the context is assembled by
+the prepare scripts.
 
 **`temperature`, if the NS run went through `ns eval`**: that pipeline does
 *not* use `InferenceConfig`'s `temperature=0.0`. The repeat suffix on

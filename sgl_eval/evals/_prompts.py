@@ -16,11 +16,27 @@ import yaml
 _VENDORED_PROMPT_DIR = (
     Path(__file__).resolve().parent.parent / "_vendored" / "nemo_skills" / "prompts"
 )
+_SE_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
 
 def vendored_prompt(name: str) -> Path:
     """Return the path to a vendored prompt yaml by basename (no extension)."""
     return _VENDORED_PROMPT_DIR / f"{name}.yaml"
+
+
+def resolve_prompt(spec: str) -> Path:
+    """Resolve a prompt spec to a yaml path.
+
+    The path branch exists so a caller can point at a prompt this repo does not
+    ship. Existence is deliberately not checked: registration resolves every
+    benchmark's default at import time, so a raise here would fail at import.
+    """
+    if "/" in spec or spec.endswith(".yaml"):
+        return Path(spec).expanduser()
+    vendored = vendored_prompt(spec)
+    if vendored.exists():
+        return vendored
+    return _SE_PROMPT_DIR / f"{spec}.yaml"
 
 
 def prompt_media_config(yaml_path: Path) -> dict:

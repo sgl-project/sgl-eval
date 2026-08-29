@@ -19,6 +19,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             predictions_writer=ctx.writer,
             load_examples=ctx.load_examples,
             bench_args=ctx.bench_args,
+            prompt_yaml=ctx.prompt_yaml,
         )
     finally:
         setup.teardown(ctx)
