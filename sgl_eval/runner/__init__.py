@@ -53,6 +53,15 @@ def run_examples(
     progress: bool = True,
     on_sample_scored: Optional[OnSampleScoredFn] = None,
 ) -> RunResult:
+    seen_ids: dict[str, int] = {}
+    for index, ex in enumerate(examples):
+        if ex.id in seen_ids:
+            raise ValueError(
+                f"duplicate example id {ex.id!r} at positions "
+                f"{seen_ids[ex.id]} and {index}; ids must be unique within a run"
+            )
+        seen_ids[ex.id] = index
+
     debug_serial = os.getenv("SGL_EVAL_DEBUG") == "1"
     total_samples = len(examples) * max(n_repeats, 1)
     workers = 1 if debug_serial else min(num_threads, max(total_samples, 1))
