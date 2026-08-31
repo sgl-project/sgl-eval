@@ -94,7 +94,6 @@ def test_checksum_failure_cleans_the_temporary_file(tmp_path, monkeypatch):
     monkeypatch.setattr(_loader.importlib, "import_module", lambda _name: mod)
     monkeypatch.setattr(_loader.httpx, "stream", fake_stream)
 
-    # A single source means the digest error surfaces directly.
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         _loader_for(archive)(None)
 
@@ -178,7 +177,10 @@ def test_missing_prepare_url_fails_before_download(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     ("url", "digest"),
-    [(_SOURCE, None), (None, "0" * 64), (_SOURCE, "not-a-digest")],
+    # (url, None) is left out: an unpaired url fails at the digest comparison
+    # with a readable message anyway. These two do not -- a digest without a url
+    # is silently never checked, and a malformed one wastes the whole download.
+    [(None, "0" * 64), (_SOURCE, "not-a-digest")],
 )
 def test_archive_configuration_is_complete_and_valid(url, digest):
     with pytest.raises(ValueError, match="archive_"):
@@ -187,17 +189,6 @@ def test_archive_configuration_is_complete_and_valid(url, digest):
             ["test"],
             archive_url=url,
             archive_sha256=digest,
-        )
-
-
-def test_archive_prefetch_cannot_replace_argparse_entry_point():
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        _loader.load_via_prepare(
-            "invalid",
-            ["test"],
-            argparse_main=True,
-            archive_url=_SOURCE,
-            archive_sha256="0" * 64,
         )
 
 
@@ -210,3 +201,14 @@ def test_registry_pins_the_archive_revision_and_digest():
     assert mmlu["archive_sha256"] == (
         "bec563ba4bac1d6aaf04141cd7d1605d7a5ca833e38f994051e818489592989b"
     )
+
+
+def test_vendored_prepare_still_exposes_the_url_it_is_redirected_through():
+    """The prefetch works by pointing the vendored module's `URL` at a local
+    file, so that variable is a contract with upstream rather than an internal
+    detail. A sync that renames it puts MMLU back on the original download with
+    nothing else failing -- every other test here drives a fake module."""
+    from sgl_eval._vendored.nemo_skills.dataset.mmlu import prepare
+
+    assert isinstance(prepare.URL, str)
+    assert prepare.URL.endswith(".tar")

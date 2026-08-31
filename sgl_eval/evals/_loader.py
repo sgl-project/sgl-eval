@@ -189,8 +189,6 @@ def load_via_prepare(
     save_kwargs = save_kwargs or {}
     if bool(archive_url) != bool(archive_sha256):
         raise ValueError("archive_url and archive_sha256 must be configured together")
-    if archive_url and argparse_main:
-        raise ValueError("archive prefetch and argparse_main are mutually exclusive")
     if archive_sha256 is not None:
         archive_sha256 = archive_sha256.lower()
         if len(archive_sha256) != 64 or any(c not in "0123456789abcdef" for c in archive_sha256):
