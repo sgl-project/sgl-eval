@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sgl_eval import VENDORED_NS_ROOT
+from sgl_eval.evals._fetch import resilient_downloads
 from sgl_eval.types import Example, MediaItem
 
 _CACHE_ROOT = Path.home() / ".cache" / "sgl_eval"
@@ -181,10 +182,11 @@ def load_via_prepare(
         if not cache_path.exists():
             mod = importlib.import_module(f"sgl_eval._vendored.nemo_skills.dataset.{name}.prepare")
             vendored_dir = Path(mod.__file__).resolve().parent
-            if argparse_main:
-                mod.main(argparse.Namespace(split=save_args[0], **save_kwargs))
-            else:
-                mod.save_data(*save_args, **save_kwargs)
+            with resilient_downloads():
+                if argparse_main:
+                    mod.main(argparse.Namespace(split=save_args[0], **save_kwargs))
+                else:
+                    mod.save_data(*save_args, **save_kwargs)
             cache_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(vendored_dir / output_basename), str(cache_path))
             # save_data's data_dir is `Path(__file__).parent`, i.e. inside
