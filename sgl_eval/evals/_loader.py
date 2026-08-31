@@ -7,8 +7,8 @@ Two patterns are needed across the current benchmark set:
     read directly.
 
   - **prepare**: data is downloaded by upstream's ``prepare.py`` (gsm8k from
-    openai/grade-school-math, mmlu from Berkeley tar, gpqa and mmlu_pro from
-    HuggingFace). We invoke it once, move its output to
+    openai/grade-school-math, mmlu from a pinned CAIS archive, and gpqa and
+    mmlu_pro from HuggingFace). We invoke it once, move its output to
     ``~/.cache/sgl_eval/<name>/``, and serve from cache on subsequent runs.
     Upstream's entry point is not uniform -- most expose ``save_data(split,
     ...)``, mmlu-pro only an argparse ``main(args)`` -- so ``argparse_main``
@@ -190,7 +190,7 @@ def load_via_prepare(
     if bool(archive_url) != bool(archive_sha256):
         raise ValueError("archive_url and archive_sha256 must be configured together")
     if archive_url and argparse_main:
-        raise ValueError("archive fallback and argparse_main are mutually exclusive")
+        raise ValueError("archive prefetch and argparse_main are mutually exclusive")
     if archive_sha256 is not None:
         archive_sha256 = archive_sha256.lower()
         if len(archive_sha256) != 64 or any(c not in "0123456789abcdef" for c in archive_sha256):
@@ -237,7 +237,7 @@ def _save_data_from_verified_archive(
 ) -> None:
     """Run a vendored prepare transform against a verified local archive."""
     if not hasattr(mod, "URL"):
-        raise RuntimeError("archive fallback requires the prepare module to define URL")
+        raise RuntimeError("archive prefetch requires the prepare module to define URL")
     original_url = mod.URL
     archive_path = _download_verified_archive(
         archive_url,

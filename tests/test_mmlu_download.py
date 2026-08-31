@@ -1,4 +1,4 @@
-"""MMLU archive fallback tests (no network)."""
+"""MMLU verified-archive prefetch tests (no network)."""
 
 from __future__ import annotations
 
@@ -94,8 +94,7 @@ def test_checksum_failure_cleans_the_temporary_file(tmp_path, monkeypatch):
     monkeypatch.setattr(_loader.importlib, "import_module", lambda _name: mod)
     monkeypatch.setattr(_loader.httpx, "stream", fake_stream)
 
-    # A single source means the digest error surfaces as itself, rather than
-    # wrapped in the "every source failed" report a fallback chain produced.
+    # A single source means the digest error surfaces directly.
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         _loader_for(archive)(None)
 
@@ -191,7 +190,7 @@ def test_archive_configuration_is_complete_and_valid(url, digest):
         )
 
 
-def test_archive_fallback_cannot_replace_argparse_entry_point():
+def test_archive_prefetch_cannot_replace_argparse_entry_point():
     with pytest.raises(ValueError, match="mutually exclusive"):
         _loader.load_via_prepare(
             "invalid",
@@ -202,7 +201,7 @@ def test_archive_fallback_cannot_replace_argparse_entry_point():
         )
 
 
-def test_registry_pins_the_mirror_revision_and_archive_digest():
+def test_registry_pins_the_archive_revision_and_digest():
     from sgl_eval.evals._registry import _TABLE
 
     [mmlu] = [entry for entry in _TABLE if entry["name"] == "mmlu"]
