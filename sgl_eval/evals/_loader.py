@@ -45,6 +45,8 @@ from sgl_eval.types import Example, MediaItem
 
 _CACHE_ROOT = Path.home() / ".cache" / "sgl_eval"
 _VENDORED_DATASET_ROOT = VENDORED_NS_ROOT / "dataset"
+# Per socket operation, not per download; a 166 MB archive reads in many chunks,
+# so this does not cap a slow but working transfer. Values are arbitrary.
 _DOWNLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
@@ -182,9 +184,8 @@ def load_via_prepare(
     ``sample_seed`` makes ``num_examples`` a seeded sample of the whole split
     rather than its first N rows.
 
-    ``archive_url`` replaces the source a prepare module downloads through its
-    module-level ``URL``. sgl-eval fetches and verifies the archive first, then
-    lets the vendored transformation consume the local copy unchanged.
+    ``archive_url`` is fetched and digest-checked here, then handed to the
+    vendored script by pointing its module-level ``URL`` at the local copy.
     """
     save_kwargs = save_kwargs or {}
     if bool(archive_url) != bool(archive_sha256):

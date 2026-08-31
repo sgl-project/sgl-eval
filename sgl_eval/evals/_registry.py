@@ -9,9 +9,8 @@ no new module. Each entry encodes only the things that genuinely differ:
   ``loader == "prepare"``.
 - ``argparse_main``: upstream's prepare.py exposes an argparse ``main(args)``
   rather than ``save_data``; ``save_args[0]`` becomes ``args.split``.
-- ``archive_url`` / ``archive_sha256``: the source and required digest when
-  sgl-eval must prefetch a prepare module's archive instead of letting the
-  vendored script fetch it.
+- ``archive_url`` / ``archive_sha256``: prefetch and digest-check the prepare
+  module's archive here instead of letting the vendored script fetch it.
 - ``media_dir`` / ``media_field``: multimodal ``prepare`` benchmarks only --
   the sidecar directory ``save_data`` writes beside its jsonl, and the jsonl
   column holding each row's path into it.
@@ -99,10 +98,8 @@ _TABLE = [
         "loader": "prepare",
         "save_args": ("test",),
         "sample_seed": 0,
-        # Upstream points at a personal faculty web space that has had repeated
-        # outages; `cais` is the Center for AI Safety, the authors' own org, so
-        # this is the same archive from a second first-party location rather
-        # than a third-party mirror. Pinned by revision, checked by digest.
+        # `cais` is the Center for AI Safety, the MMLU authors' own org -- this
+        # is the same archive served first-party, not a third-party mirror of it.
         "archive_url": (
             f"https://huggingface.co/datasets/cais/mmlu/resolve/{_MMLU_ARCHIVE_REVISION}/data.tar"
         ),

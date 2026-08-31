@@ -177,9 +177,8 @@ def test_missing_prepare_url_fails_before_download(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     ("url", "digest"),
-    # (url, None) is left out: an unpaired url fails at the digest comparison
-    # with a readable message anyway. These two do not -- a digest without a url
-    # is silently never checked, and a malformed one wastes the whole download.
+    # (url, None) is left out -- it fails at the digest comparison anyway. These
+    # two do not: an unpaired digest is never checked, a bad one wastes 166 MB.
     [(None, "0" * 64), (_SOURCE, "not-a-digest")],
 )
 def test_archive_configuration_is_complete_and_valid(url, digest):
@@ -204,10 +203,9 @@ def test_registry_pins_the_archive_revision_and_digest():
 
 
 def test_vendored_prepare_still_exposes_the_url_it_is_redirected_through():
-    """The prefetch works by pointing the vendored module's `URL` at a local
-    file, so that variable is a contract with upstream rather than an internal
-    detail. A sync that renames it puts MMLU back on the original download with
-    nothing else failing -- every other test here drives a fake module."""
+    """A sync that renames the vendored module-level `URL` silently puts MMLU
+    back on the upstream download: the prefetch redirects that name, and every
+    other test here drives a fake module."""
     from sgl_eval._vendored.nemo_skills.dataset.mmlu import prepare
 
     assert isinstance(prepare.URL, str)
