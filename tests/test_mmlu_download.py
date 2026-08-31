@@ -15,8 +15,7 @@ import pytest
 
 from sgl_eval.evals import _loader
 
-_PRIMARY = "https://primary.invalid/data.tar"
-_MIRROR = "https://mirror.invalid/data.tar"
+_SOURCE = "https://pinned.invalid/data.tar"
 
 
 def _fake_prepare_module(tmp_path: Path, expected_archive: bytes):
@@ -44,12 +43,12 @@ def _loader_for(archive: bytes):
     return _loader.load_via_prepare(
         "mmlu",
         ["test"],
-        archive_urls=(_PRIMARY, _MIRROR),
+        archive_url=_SOURCE,
         archive_sha256=hashlib.sha256(archive).hexdigest(),
     )
 
 
-def test_primary_failure_uses_verified_mirror_and_then_cache(tmp_path, monkeypatch):
+def test_archive_is_fetched_once_and_then_served_from_cache(tmp_path, monkeypatch):
     archive = b"pinned MMLU archive"
     mod, consumed_urls = _fake_prepare_module(tmp_path, archive)
     seen = []
@@ -57,9 +56,6 @@ def test_primary_failure_uses_verified_mirror_and_then_cache(tmp_path, monkeypat
     @contextmanager
     def fake_stream(method, url, **kwargs):
         seen.append((method, url, kwargs))
-        if url == _PRIMARY:
-            request = httpx.Request(method, url)
-            raise httpx.ConnectError("primary unavailable", request=request)
         yield httpx.Response(200, content=archive, request=httpx.Request(method, url))
 
     monkeypatch.setattr(_loader, "_CACHE_ROOT", tmp_path / "cache")
@@ -71,7 +67,7 @@ def test_primary_failure_uses_verified_mirror_and_then_cache(tmp_path, monkeypat
     [cached_example] = loader(None)
 
     assert example.id == cached_example.id == "m1"
-    assert [url for _method, url, _kwargs in seen] == [_PRIMARY, _MIRROR]
+    assert [url for _method, url, _kwargs in seen] == [_SOURCE]
     assert all(kwargs["follow_redirects"] for _method, _url, kwargs in seen)
     assert all(kwargs["timeout"] is _loader._DOWNLOAD_TIMEOUT for _method, _url, kwargs in seen)
     assert len(consumed_urls) == 1
@@ -80,7 +76,7 @@ def test_primary_failure_uses_verified_mirror_and_then_cache(tmp_path, monkeypat
     assert not list((tmp_path / "cache" / "mmlu").glob(".sgl-eval-archive-*"))
 
 
-def test_checksum_failure_tries_all_sources_and_cleans_temporary_files(tmp_path, monkeypatch):
+def test_checksum_failure_cleans_the_temporary_file(tmp_path, monkeypatch):
     archive = b"expected archive"
     mod, consumed_urls = _fake_prepare_module(tmp_path, archive)
     seen = []
@@ -98,10 +94,12 @@ def test_checksum_failure_tries_all_sources_and_cleans_temporary_files(tmp_path,
     monkeypatch.setattr(_loader.importlib, "import_module", lambda _name: mod)
     monkeypatch.setattr(_loader.httpx, "stream", fake_stream)
 
-    with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
+    # A single source means the digest error surfaces as itself, rather than
+    # wrapped in the "every source failed" report a fallback chain produced.
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
         _loader_for(archive)(None)
 
-    assert seen == [_PRIMARY, _MIRROR]
+    assert seen == [_SOURCE]
     assert consumed_urls == []
     assert mod.URL == "https://upstream.invalid/data.tar"
     assert not list((tmp_path / "cache" / "mmlu").glob(".sgl-eval-archive-*"))
@@ -152,7 +150,7 @@ def test_prepare_failure_restores_url_and_removes_verified_archive(tmp_path, mon
         _loader.load_via_prepare(
             "mmlu",
             ["test"],
-            archive_urls=(_PRIMARY,),
+            archive_url=_SOURCE,
             archive_sha256=hashlib.sha256(archive).hexdigest(),
         )(None)
 
@@ -180,15 +178,15 @@ def test_missing_prepare_url_fails_before_download(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("urls", "digest"),
-    [((_PRIMARY,), None), (None, "0" * 64), ((_PRIMARY,), "not-a-digest")],
+    ("url", "digest"),
+    [(_SOURCE, None), (None, "0" * 64), (_SOURCE, "not-a-digest")],
 )
-def test_archive_configuration_is_complete_and_valid(urls, digest):
+def test_archive_configuration_is_complete_and_valid(url, digest):
     with pytest.raises(ValueError, match="archive_"):
         _loader.load_via_prepare(
             "mmlu",
             ["test"],
-            archive_urls=urls,
+            archive_url=url,
             archive_sha256=digest,
         )
 
@@ -199,7 +197,7 @@ def test_archive_fallback_cannot_replace_argparse_entry_point():
             "invalid",
             ["test"],
             argparse_main=True,
-            archive_urls=(_PRIMARY,),
+            archive_url=_SOURCE,
             archive_sha256="0" * 64,
         )
 
@@ -208,7 +206,8 @@ def test_registry_pins_the_mirror_revision_and_archive_digest():
     from sgl_eval.evals._registry import _TABLE
 
     [mmlu] = [entry for entry in _TABLE if entry["name"] == "mmlu"]
-    assert "c30699e8356da336a370243923dbaf21066bb9fe" in mmlu["archive_urls"][1]
+    assert "c30699e8356da336a370243923dbaf21066bb9fe" in mmlu["archive_url"]
+    assert "huggingface.co/datasets/cais/mmlu" in mmlu["archive_url"]
     assert mmlu["archive_sha256"] == (
         "bec563ba4bac1d6aaf04141cd7d1605d7a5ca833e38f994051e818489592989b"
     )

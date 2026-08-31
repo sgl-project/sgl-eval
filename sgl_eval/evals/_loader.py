@@ -169,7 +169,7 @@ def load_via_prepare(
     media_field: Optional[str] = None,
     sample_seed: Optional[int] = None,
     argparse_main: bool = False,
-    archive_urls: Optional[Sequence[str]] = None,
+    archive_url: Optional[str] = None,
     archive_sha256: Optional[str] = None,
 ) -> Callable[[Optional[int]], List[Example]]:
     """Loader that runs vendored ``<name>/prepare.py`` once and caches the
@@ -182,16 +182,14 @@ def load_via_prepare(
     ``sample_seed`` makes ``num_examples`` a seeded sample of the whole split
     rather than its first N rows.
 
-    ``archive_urls`` provides ordered mirrors for a prepare module whose
-    ``save_data`` downloads one archive through its module-level ``URL``.
-    sgl-eval downloads and verifies the archive first, then lets the vendored
-    transformation consume the local copy unchanged.
+    ``archive_url`` replaces the source a prepare module downloads through its
+    module-level ``URL``. sgl-eval fetches and verifies the archive first, then
+    lets the vendored transformation consume the local copy unchanged.
     """
     save_kwargs = save_kwargs or {}
-    archive_urls = tuple(archive_urls or ())
-    if bool(archive_urls) != bool(archive_sha256):
-        raise ValueError("archive_urls and archive_sha256 must be configured together")
-    if archive_urls and argparse_main:
+    if bool(archive_url) != bool(archive_sha256):
+        raise ValueError("archive_url and archive_sha256 must be configured together")
+    if archive_url and argparse_main:
         raise ValueError("archive fallback and argparse_main are mutually exclusive")
     if archive_sha256 is not None:
         archive_sha256 = archive_sha256.lower()
@@ -205,12 +203,12 @@ def load_via_prepare(
         if not cache_path.exists():
             mod = importlib.import_module(f"sgl_eval._vendored.nemo_skills.dataset.{name}.prepare")
             vendored_dir = Path(mod.__file__).resolve().parent
-            if archive_urls:
+            if archive_url:
                 _save_data_from_verified_archive(
                     mod,
                     save_args,
                     save_kwargs,
-                    archive_urls,
+                    archive_url,
                     archive_sha256,
                     cache_dir,
                 )
@@ -233,7 +231,7 @@ def _save_data_from_verified_archive(
     mod: Any,
     save_args: Sequence[Any],
     save_kwargs: Dict[str, Any],
-    archive_urls: Sequence[str],
+    archive_url: str,
     archive_sha256: str,
     cache_dir: Path,
 ) -> None:
@@ -242,7 +240,7 @@ def _save_data_from_verified_archive(
         raise RuntimeError("archive fallback requires the prepare module to define URL")
     original_url = mod.URL
     archive_path = _download_verified_archive(
-        archive_urls,
+        archive_url,
         expected_sha256=archive_sha256,
         directory=cache_dir,
     )
@@ -257,54 +255,46 @@ def _save_data_from_verified_archive(
 
 
 def _download_verified_archive(
-    urls: Sequence[str],
+    url: str,
     expected_sha256: str,
     directory: Path,
 ) -> Path:
-    """Download the first reachable archive whose SHA-256 matches."""
+    """Download the archive and return it only if its SHA-256 matches."""
     directory.mkdir(parents=True, exist_ok=True)
-    failures: list[str] = []
+    fd, temp_name = tempfile.mkstemp(
+        prefix=".sgl-eval-archive-",
+        suffix=".tmp",
+        dir=directory,
+    )
+    os.close(fd)
+    temp_path = Path(temp_name)
+    digest = hashlib.sha256()
+    verified = False
+    try:
+        with (
+            temp_path.open("wb") as temp_file,
+            httpx.stream(
+                "GET",
+                url,
+                follow_redirects=True,
+                timeout=_DOWNLOAD_TIMEOUT,
+            ) as response,
+        ):
+            response.raise_for_status()
+            for chunk in response.iter_bytes(_DOWNLOAD_CHUNK_BYTES):
+                temp_file.write(chunk)
+                digest.update(chunk)
 
-    for url in urls:
-        fd, temp_name = tempfile.mkstemp(
-            prefix=".sgl-eval-archive-",
-            suffix=".tmp",
-            dir=directory,
-        )
-        os.close(fd)
-        temp_path = Path(temp_name)
-        digest = hashlib.sha256()
-        verified = False
-        try:
-            with (
-                temp_path.open("wb") as temp_file,
-                httpx.stream(
-                    "GET",
-                    url,
-                    follow_redirects=True,
-                    timeout=_DOWNLOAD_TIMEOUT,
-                ) as response,
-            ):
-                response.raise_for_status()
-                for chunk in response.iter_bytes(_DOWNLOAD_CHUNK_BYTES):
-                    temp_file.write(chunk)
-                    digest.update(chunk)
-
-            actual_sha256 = digest.hexdigest()
-            if actual_sha256 != expected_sha256:
-                raise ValueError(
-                    f"SHA-256 mismatch (expected {expected_sha256}, got {actual_sha256})"
-                )
-            verified = True
-            return temp_path
-        except (OSError, httpx.HTTPError, ValueError) as exc:
-            failures.append(f"{url}: {type(exc).__name__}: {exc}")
-        finally:
-            if not verified:
-                temp_path.unlink(missing_ok=True)
-
-    details = "\n".join(f"- {failure}" for failure in failures)
-    raise RuntimeError(f"Unable to download a verified dataset archive:\n{details}")
+        actual_sha256 = digest.hexdigest()
+        if actual_sha256 != expected_sha256:
+            raise ValueError(
+                f"SHA-256 mismatch for {url} (expected {expected_sha256}, got {actual_sha256})"
+            )
+        verified = True
+        return temp_path
+    finally:
+        if not verified:
+            temp_path.unlink(missing_ok=True)
 
 
 def _move_tree(src: Path, dst: Path) -> None:
