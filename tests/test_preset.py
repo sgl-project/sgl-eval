@@ -176,6 +176,16 @@ def test_chat_template_kwarg_wins_over_thinking() -> None:
     gen = apply_to_gen(
         GenConfig(chat_template_kwargs={"thinking": True}),
         preset=None,
+        args=_args(chat_template_kwarg=["thinking=false"]),
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
+def test_same_layer_nested_thinking_beats_flat() -> None:
+    """Within one source the nested key wins over the flat ``thinking`` alias."""
+    gen = apply_to_gen(
+        GenConfig(),
+        preset=None,
         args=_args(thinking=True, chat_template_kwarg=["thinking=false"]),
     )
     assert gen.chat_template_kwargs == {"thinking": False}
