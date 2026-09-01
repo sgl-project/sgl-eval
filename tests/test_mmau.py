@@ -82,7 +82,11 @@ def test_build_example(monkeypatch):
 
 
 def test_interleave_rows_by_task_balances_tasks():
-    rows = [_row(task=t, row_id=f"{t}-{i}") for t, n in [("sound", 4), ("music", 2), ("speech", 2)] for i in range(n)]
+    rows = [
+        _row(task=t, row_id=f"{t}-{i}")
+        for t, n in [("sound", 4), ("music", 2), ("speech", 2)]
+        for i in range(n)
+    ]
     picked = _mmau._interleave_rows_by_task(rows, 6)
     assert len(picked) == 6
     tasks = [_mmau._task_of(r) for r in picked]
