@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from sgl_eval.model_preset import ModelPreset
 from sgl_eval.preset import (
     Endpoint,
     Expected,
@@ -180,6 +181,16 @@ def test_chat_template_kwarg_wins_over_thinking() -> None:
     assert gen.chat_template_kwargs == {"thinking": False}
 
 
+def test_same_layer_nested_thinking_beats_flat() -> None:
+    """Within one source the nested key wins over the flat ``thinking`` alias."""
+    gen = apply_to_gen(
+        GenConfig(),
+        preset=None,
+        args=_args(thinking=True, chat_template_kwarg=["thinking=false"]),
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
 def test_preset_carries_chat_template_kwargs() -> None:
     """A preset has to be able to replay the run it names. ``enable_thinking``
     changes the prompt exactly like ``thinking`` does, so a preset without it
@@ -213,6 +224,32 @@ def test_apply_to_gen_thinking_priority() -> None:
     # Preset beats default
     gen = apply_to_gen(default, _preset_with(thinking=True), _args())
     assert gen.chat_template_kwargs == {"thinking": True}
+
+
+def test_cli_thinking_beats_user_preset_kwargs() -> None:
+    """A nested preset value must not override an explicit CLI flag."""
+    gen = apply_to_gen(
+        GenConfig(),
+        _preset_with(chat_template_kwargs={"thinking": True}),
+        _args(thinking=False),
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
+def test_user_preset_thinking_beats_model_preset_kwargs() -> None:
+    """A nested model default must not override a saved user preset."""
+    model_preset = ModelPreset(
+        model_id="org/model",
+        model="org/model",
+        sampling=Sampling(chat_template_kwargs={"thinking": True}),
+    )
+    gen = apply_to_gen(
+        GenConfig(),
+        _preset_with(thinking=False),
+        _args(),
+        model_preset,
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
 
 
 def test_apply_to_gen_reasoning_effort_priority() -> None:

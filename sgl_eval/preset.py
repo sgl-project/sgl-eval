@@ -260,19 +260,16 @@ def apply_to_gen(
     """
     p = preset.sampling if preset else None
     mp = model_preset.sampling if model_preset else None
+    cli = Sampling(thinking=args.thinking, chat_template_kwargs=parse_chat_template_kwargs(args))
     chat_template_kwargs = dict(default.chat_template_kwargs or {})
-    thinking = pick(
-        args.thinking,
-        p.thinking if p else None,
-        mp.thinking if mp else None,
-    )
-    if thinking is not None:
-        chat_template_kwargs["thinking"] = thinking
-    if mp and mp.chat_template_kwargs:
-        chat_template_kwargs.update(mp.chat_template_kwargs)
-    if p and p.chat_template_kwargs:
-        chat_template_kwargs.update(p.chat_template_kwargs)
-    chat_template_kwargs.update(parse_chat_template_kwargs(args))
+    # Lowest priority first; each later layer overwrites the previous one.
+    for layer in (mp, p, cli):
+        if layer is None:
+            continue
+        if layer.thinking is not None:
+            chat_template_kwargs["thinking"] = layer.thinking
+        # Within one source the nested key wins over the flat ``thinking`` alias.
+        chat_template_kwargs.update(layer.chat_template_kwargs or {})
     return GenConfig(
         temperature=pick(
             args.temperature,
