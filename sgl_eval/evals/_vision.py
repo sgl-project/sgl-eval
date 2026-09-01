@@ -1,9 +1,10 @@
-"""Vision-aware message construction shared by multimodal benchmarks.
+"""Media-aware message construction shared by multimodal benchmarks.
 
 ``build_user_content`` turns a prompt + ``Example.media`` list into an
 OpenAI-style ``content``: a plain string when there is no media (so text
 benchmarks stay byte-for-byte compatible), or a list of text / image_url /
-video_url blocks otherwise. The sampler passes it through unchanged.
+video_url / audio_url blocks otherwise. The sampler passes it through
+unchanged.
 
 Image placement: if the prompt contains ``[image]`` placeholders (left by
 the MMMU-Pro loader after stripping ``<image n>``), images are inserted at
@@ -65,7 +66,7 @@ def build_user_content(
     else:
         content.append({"type": "text", "text": prompt})
 
-    # Append media not consumed above (video, and images with no placeholder).
+    # Append media not consumed above (video/audio, and images with no placeholder).
     inserted_images = image_idx
     for m in media:
         if m.kind == "image":
@@ -77,6 +78,8 @@ def build_user_content(
             if not m.url:
                 raise ValueError("video MediaItem requires a url (too large to base64-inline)")
             content.append({"type": "video_url", "video_url": {"url": m.url}})
+        elif m.kind == "audio":
+            content.append(_audio_block(m))
         else:
             raise ValueError(f"unsupported media kind: {m.kind!r}")
     return content
@@ -85,6 +88,11 @@ def build_user_content(
 def _image_block(m: MediaItem) -> dict:
     url = m.url or _data_url(m.data, m.mime or "image/png")
     return {"type": "image_url", "image_url": {"url": url}}
+
+
+def _audio_block(m: MediaItem) -> dict:
+    url = m.url or _data_url(m.data, m.mime or "audio/wav")
+    return {"type": "audio_url", "audio_url": {"url": url}}
 
 
 def _data_url(data: bytes, mime: str) -> str:
