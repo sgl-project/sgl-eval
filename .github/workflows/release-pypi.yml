@@ -1,12 +1,5 @@
 name: release-pypi
 
-# Publishes sgl-eval to PyPI via trusted publishing (OIDC): no API token is
-# stored in the repo. PyPI trusts this exact workflow file in the `pypi`
-# environment of sgl-project/sgl-eval.
-#
-# Release flow: bump `version` in pyproject.toml and sgl_eval/__init__.py,
-# merge, then push a matching tag (`git tag v0.1.0 && git push origin v0.1.0`).
-
 on:
   push:
     tags:
@@ -57,6 +50,8 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    # PyPI's trusted-publisher entry is keyed on this workflow's file name and
+    # this environment name; renaming either breaks publishing.
     environment: pypi
     permissions:
       id-token: write
