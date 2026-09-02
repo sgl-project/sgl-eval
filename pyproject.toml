@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sgl-eval"
-version = "0.0.1"
+version = "0.1.0"
 description = "One-click accuracy evaluation harness for SGLang."
 readme = "README.md"
 requires-python = ">=3.10"

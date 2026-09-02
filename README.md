@@ -14,7 +14,7 @@ sgl-eval contributes the transport, runner, and benchmark wiring.
 ## Quick start
 
 ```bash
-pip install git+https://github.com/sgl-project/sgl-eval
+pip install sgl-eval
 
 sgl-eval ping --base-url http://localhost:30000/v1
 sgl-eval run gsm8k --base-url http://localhost:30000/v1 --num-examples 50
