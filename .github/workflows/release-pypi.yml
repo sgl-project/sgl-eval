@@ -2,14 +2,17 @@ name: release-pypi
 
 on:
   push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+*"
+    branches: [main]
+    paths: [pyproject.toml]
   workflow_dispatch:
 
 jobs:
-  build:
+  check:
     if: github.repository == 'sgl-project/sgl-eval'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,20 +20,51 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Read version and decide whether it is already released
+        id: version
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           ver="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          if [ "$tag" != "$ver" ]; then
-            echo "tag v$tag does not match pyproject version $ver" >&2
-            exit 1
-          fi
           init_ver="$(python -c 'import re; print(re.search(r"__version__ = \"(.*)\"", open("sgl_eval/__init__.py").read()).group(1))')"
           if [ "$init_ver" != "$ver" ]; then
             echo "sgl_eval/__init__.py __version__ $init_ver does not match pyproject version $ver" >&2
             exit 1
           fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          pip install -q packaging
+          tags="$(git ls-remote --tags origin 'refs/tags/v*' | sed 's|.*refs/tags/v||; s|\^{}$||' | sort -u)"
+          decision="$(python - "$ver" $tags <<'PY'
+          import sys
+          from packaging.version import Version
+          new, *released = map(Version, sys.argv[1:])
+          if new in released:
+              print("skip")
+          elif released and new < max(released):
+              print(f"fail {max(released)}")
+          else:
+              print("publish")
+          PY
+          )"
+          case "$decision" in
+            skip)
+              echo "v$ver already released; nothing to publish"
+              echo "publish=false" >> "$GITHUB_OUTPUT" ;;
+            fail*)
+              echo "version $ver is not newer than latest release ${decision#fail }" >&2
+              exit 1 ;;
+            publish)
+              echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  build:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Run tests
         run: |
@@ -48,17 +82,27 @@ jobs:
           path: dist/
 
   publish:
-    needs: build
+    needs: [check, build]
     runs-on: ubuntu-latest
     # PyPI's trusted-publisher entry is keyed on this workflow's file name and
     # this environment name; renaming either breaks publishing.
     environment: pypi
     permissions:
       id-token: write
+      contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Tag and create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ needs.check.outputs.version }}" dist/* \
+            --target "$GITHUB_SHA" --generate-notes
