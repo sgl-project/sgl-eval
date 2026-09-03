@@ -16,6 +16,7 @@ an endpoint. Most need nothing.
 | `gpqa` | multichoice | Diamond split |
 | `mmmu_pro` | multichoice | VLM endpoint; MMMU-Pro `standard (10 options)` -- [see below](#mmmu-pro-variants) |
 | `mmmu_pro_vision` | multichoice | VLM endpoint; MMMU-Pro `vision` -- [see below](#mmmu-pro-variants) |
+| `mindcube` | multichoice | VLM endpoint; MindCube tinybench, raw-QA setting -- [see below](#mindcube) |
 | `ruler2` | ruler2 | extra install, a required flag, generated data -- [see below](#ruler2) |
 
 All scoring behavior (prompt, answer extraction, grading, pass@k /
@@ -204,3 +205,40 @@ explicitly, e.g. `1048576 - 768` to reserve room to answer), and the same
 `--num-examples` is *not* a substitute for `--ruler2-dataset-size`: it slices
 the generated file (NS's `++max_samples`), it does not change what gets
 generated.
+
+---
+
+## MindCube
+
+[MindCube](https://github.com/mll-lab-nu/MindCube) (Yin et al., 2025) asks
+whether a VLM can build a spatial mental model from a few views: 2-4 images of
+a scene plus a multiple-choice question about positions, orientations, or
+"what-if" movements. `mindcube` runs the paper's evaluation split
+(`MindCube_tinybench.jsonl`, 1,050 questions: 600 `among`, 250 `around`,
+200 `rotation`) in the **raw QA** setting -- views + question, answer directly.
+The cognitive-map settings (`aug_cgmap_*`, `plain_cgmap_*`, `ff_rsn`) need
+scaffold data and a map-parsing evaluator and are not registered.
+
+sgl-eval-own, like `mmmu_pro`: NeMo-Skills has no MindCube module. What is
+sgl-eval's and what is the official protocol's:
+
+| | source |
+|---|---|
+| prompt | official `RAW_QA` template (`[Task] ... [Answer Instruction] ... [Question]`), verbatim |
+| image placement | views before the text, in dataset order (image 1..N as the question refers to them), original bytes |
+| answer extraction | official `extract_answer` regex cascade, ported verbatim |
+| correctness | extracted letter == `gt_answer` |
+| overall | official filtered accuracy (`translation` tracked under `task.translation` but excluded from `score`; tinybench has none) |
+| per-setting | `task.among` / `task.around` / `task.rotation` |
+| `no_answer` | share of responses the official extractor could not parse |
+| `--n-repeats k` | `pass@1[avg-of-k]` / `pass@k` / `majority@k` via the vendored `MathMetrics` |
+
+Data: `MLL-Lab/MindCube` `data.zip` (~640 MB) is downloaded from the Hub and
+extracted once into `~/.cache/sgl_eval/mindcube/`. Set `SGL_EVAL_MINDCUBE_DIR`
+to a directory that already contains the extracted `data/` to skip that.
+
+The official prompt asks for the answer only, so the default is
+`thinking=False`; pass `--thinking` for reasoning models. The extractor reads
+the model's final `content`, not its reasoning stream. `--num-examples N`
+takes a setting-balanced sample. `--from-dataset` is not supported (image
+inputs are required).
