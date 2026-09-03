@@ -53,7 +53,9 @@ gsm8k:  34%|###4      | 452/1319 [02:11<04:12, 3.4it/s, acc=81.42%]
 Every scored sample is streamed to
 `<out-dir>/sgl_eval_<name>_<stamp>/output-rs*.jsonl` as it lands (disable
 with `--no-dump-predictions`), so the per-sample record survives however the
-run ends.
+run ends. Each record stores the assistant's final response in `generation`
+and separately parsed reasoning in `reasoning_content` when the endpoint
+provides it.
 
 ---
 

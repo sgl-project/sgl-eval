@@ -83,6 +83,7 @@ class PredictionsWriter:
     ) -> None:
         pred: Dict[str, Any] = {
             "generation": sample.text,
+            "reasoning_content": sample.reasoning_content,
             **sample_to_pred(sample, ex, self._schema),
             "predicted_answer": extracted,
             self._schema.score_field: bool(score) if self._schema.binary_score else score,
