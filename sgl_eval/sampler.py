@@ -162,21 +162,26 @@ class ChatCompletionSampler:
         response: Any, *, start: Optional[float] = None, end: Optional[float] = None
     ) -> Sample:
         choice = response.choices[0]
-        text = choice.message.content or ""
+        message = choice.message
+        text = message.content or ""
+        reasoning_content = getattr(message, "reasoning_content", None)
         usage = getattr(response, "usage", None)
         completion_tokens = getattr(usage, "completion_tokens", None) if usage else None
         prompt_tokens = getattr(usage, "prompt_tokens", None) if usage else None
 
-        # Reasoning models (e.g. OpenAI o-series, sglang thinking-mode)
-        # report split via ``usage.completion_tokens_details.reasoning_tokens``.
+        # OpenAI reports the split under completion_tokens_details. SGLang
+        # historically exposed the same count directly on usage.
         reasoning_tokens = None
         if usage is not None:
             details = getattr(usage, "completion_tokens_details", None)
             if details is not None:
                 reasoning_tokens = getattr(details, "reasoning_tokens", None)
+            if reasoning_tokens is None:
+                reasoning_tokens = getattr(usage, "reasoning_tokens", None)
 
         return Sample(
             text=text,
+            reasoning_content=reasoning_content,
             completion_tokens=completion_tokens,
             prompt_tokens=prompt_tokens,
             reasoning_tokens=reasoning_tokens,

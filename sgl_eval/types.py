@@ -50,6 +50,7 @@ class Sample:
     generation_start_time: Optional[float] = None
     generation_end_time: Optional[float] = None
     raw: Any = None
+    reasoning_content: Optional[str] = None
 
 
 @dataclass
