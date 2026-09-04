@@ -18,6 +18,9 @@ no new module. Each entry encodes only the things that genuinely differ:
   split, for benchmarks whose jsonl is grouped rather than shuffled.
 - ``thinking``: whether to set ``chat_template_kwargs={"thinking": True}``
   by default. True for reasoning benchmarks (aime / gpqa); off otherwise.
+- ``few_shot_examples``: ``"<module>:<name>"`` under the vendored
+  ``nemo_skills.prompt.few_shot_examples``; rendered into the prompt yaml's
+  ``{examples}`` slot. ``--num-shots`` trims or disables it per run.
 - ``default_n_repeats``: per-example repeat count (sgl-eval choice; NS
   also leaves this to CLI via ``--benchmarks=name:N``).
 - ``default_num_threads``: concurrency ceiling, defaulting to 64. Long-context
@@ -43,13 +46,13 @@ ships no dataset metadata -- its subtasks only exist once generated).
 from __future__ import annotations
 
 import importlib
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from sgl_eval.evals._loader import load_bundled, load_via_prepare
 from sgl_eval.evals._math import run_math_benchmark
 from sgl_eval.evals._mmmu_pro import load_mmmu_pro
 from sgl_eval.evals._multichoice import run_multichoice_benchmark
-from sgl_eval.evals._prompts import resolve_prompt
+from sgl_eval.evals._prompts import load_few_shot_examples, resolve_prompt
 from sgl_eval.evals._ruler2 import PRED_SCHEMA as _RULER2_PRED_SCHEMA
 from sgl_eval.evals._ruler2 import add_arguments as _add_ruler2_arguments
 from sgl_eval.evals._ruler2 import run_ruler2_benchmark
@@ -68,7 +71,12 @@ _TABLE = [
         "save_args": ("test",),
         "thinking": False,
         "default_n_repeats": 1,
-        "description": "GSM8K grade-school math (single-shot, mean accuracy).",
+        # The standard 8-shot CoT prompt (lm-eval gsm8k-cot / CoT paper). The
+        # zero-shot generic/math wording makes reasoning models (Qwen3.5) loop
+        # on the answer-format instruction until max_tokens: 7-28% truncated,
+        # score 0.90-0.95 vs 0.985 with these examples on the same server.
+        "few_shot_examples": "gsm8k:gsm8k_standard_few_shot",
+        "description": "GSM8K grade-school math (8-shot CoT, mean accuracy).",
     },
     {
         "name": "aime24",
@@ -227,8 +235,11 @@ def _build_loader(entry: dict):
 # Per-category behavior, in one place. Every factory takes the same arguments so
 # the registration loop below stays free of benchmark names; a new category is a
 # new row here plus its runner module.
-def _math_run(name: str, prompt_basename: str, loader: Callable):
+def _math_run(
+    name: str, prompt_basename: str, loader: Callable, few_shot_examples: Optional[str] = None
+):
     default_prompt_yaml = resolve_prompt(prompt_basename)
+    default_examples = load_few_shot_examples(few_shot_examples) if few_shot_examples else []
 
     def run(
         *,
@@ -241,7 +252,18 @@ def _math_run(name: str, prompt_basename: str, loader: Callable):
         load_examples=None,
         bench_args=None,
         prompt_yaml=None,
+        num_shots=None,
     ):
+        examples = default_examples
+        if num_shots is not None:
+            if num_shots and not default_examples:
+                raise ValueError(f"{name} ships no few-shot examples; --num-shots is not supported")
+            if num_shots > len(default_examples):
+                raise ValueError(
+                    f"{name}: --num-shots {num_shots} exceeds the {len(default_examples)} "
+                    "vendored examples"
+                )
+            examples = default_examples[:num_shots]
         return run_math_benchmark(
             name=name,
             sampler=sampler,
@@ -251,6 +273,7 @@ def _math_run(name: str, prompt_basename: str, loader: Callable):
             num_threads=num_threads,
             load_examples=load_examples or loader,
             prompt_yaml=prompt_yaml or default_prompt_yaml,
+            few_shot_examples=examples or None,
             predictions_writer=predictions_writer,
         )
 
@@ -271,7 +294,10 @@ def _mcq_run(name: str, prompt_basename: str, loader: Callable):
         load_examples=None,
         bench_args=None,
         prompt_yaml=None,
+        num_shots=None,
     ):
+        if num_shots:
+            raise ValueError(f"{name} ships no few-shot examples; --num-shots is not supported")
         return run_multichoice_benchmark(
             name=name,
             sampler=sampler,
@@ -299,7 +325,10 @@ def _ruler2_run(name: str, _prompt_basename: str, _loader: Callable):
         load_examples=None,
         bench_args=None,
         prompt_yaml=None,
+        num_shots=None,
     ):
+        if num_shots:
+            raise ValueError(f"{name} ships no few-shot examples; --num-shots is not supported")
         if prompt_yaml is not None:
             raise ValueError(
                 f"{name} does not take a prompt override: its prompt is a pure "
@@ -349,7 +378,12 @@ for _entry in _TABLE:
             description=_entry["description"],
             default_gen=_build_default_gen(_entry["thinking"]),
             default_n_repeats=_entry["default_n_repeats"],
-            run=_category["make_run"](_name, _prompt_basename, _build_loader(_entry)),
+            run=_category["make_run"](
+                _name,
+                _prompt_basename,
+                _build_loader(_entry),
+                **({"few_shot_examples": _entry["few_shot_examples"]} if "few_shot_examples" in _entry else {}),
+            ),
             default_num_threads=_entry.get("default_num_threads", 64),
             pred_schema=_category.get("pred_schema") or PredSchema(),
             add_arguments=_category.get("add_arguments"),

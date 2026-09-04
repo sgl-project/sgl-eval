@@ -132,6 +132,16 @@ def build_parser() -> argparse.ArgumentParser:
         "scores are not comparable across prompts -- the choice is recorded in "
         "metrics.json.",
     )
+    p_run.add_argument(
+        "--num-shots",
+        type=int,
+        default=None,
+        metavar="N",
+        help="number of few-shot examples to prepend for benchmarks that ship them "
+        "(gsm8k: 8 by default, the lm-eval gsm8k-cot set). 0 runs zero-shot. "
+        "Changes what the model is asked, so scores are not comparable across "
+        "values -- the choice is recorded in metrics.json.",
+    )
     p_run.set_defaults(func=cmd_run, dump_predictions=True)
 
     # Benchmarks contribute their own options, so argparse -- not a hand-rolled

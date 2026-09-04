@@ -9,7 +9,7 @@ an endpoint. Most need nothing.
 
 | benchmark | category | notes |
 |---|---|---|
-| `gsm8k` | math | -- |
+| `gsm8k` | math | 8-shot CoT by default (lm-eval `gsm8k-cot` examples); `--num-shots 0` for the zero-shot `generic/math` prompt -- [see below](#gsm8k-few-shot) |
 | `aime24/25/26` | math | one per contest year, same shape |
 | `mmlu` | multichoice | -- |
 | `mmlu_pro` | multichoice | text 10-choice; **not** `mmmu_pro` -- [see below](#mmlu-pro-vs-mmmu-pro) |
@@ -204,3 +204,16 @@ explicitly, e.g. `1048576 - 768` to reserve room to answer), and the same
 `--num-examples` is *not* a substitute for `--ruler2-dataset-size`: it slices
 the generated file (NS's `++max_samples`), it does not change what gets
 generated.
+
+## gsm8k few-shot
+
+`gsm8k` prepends NeMo-Skills' `gsm8k_standard_few_shot` (the 8 CoT-paper
+examples lm-eval's `gsm8k-cot` task uses) inside the `generic/math` prompt.
+The zero-shot wording alone ("put the answer (and only answer) inside
+\boxed{}") makes reasoning models such as Qwen3.5-397B-A17B loop on the
+answer format inside their reasoning until `max_tokens`: on the same server
+(4x GB300, `max_tokens 16384`, T=0.6) it truncates 7-28% of samples and scores
+0.90-0.95, while the 8-shot prompt truncates <=0.5% and scores 0.975-0.985,
+matching sglang's 5-shot `run_eval` number. `--num-shots N` trims the set,
+`--num-shots 0` restores the zero-shot prompt; the value is recorded in
+`metrics.json` because scores are not comparable across it.
