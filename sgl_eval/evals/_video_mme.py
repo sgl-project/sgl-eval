@@ -208,9 +208,15 @@ def _build_example(root: Path, row: dict[str, Any], use_subtitles: bool) -> Exam
     )
 
 
-def load_video_mme_examples(num_examples: int | None, use_subtitles: bool = False) -> list[Example]:
+def load_video_mme_examples(
+    num_examples: int | None, use_subtitles: bool = False, duration: str | None = None
+) -> list[Example]:
     root = _data_root()
     rows = _read_rows()
+    if duration:
+        # Official ``eval_your_results.py --video_duration_type``: score one
+        # bucket (900 questions: 300 videos x 3) on its own.
+        rows = [row for row in rows if row["duration"] == duration]
     if num_examples is not None:
         rows = _interleave_rows_by_duration(rows, num_examples)
     examples: list[Example] = []
@@ -312,6 +318,11 @@ def add_arguments(group: Any) -> None:
         ),
     )
     group.add_argument(
+        "--video-mme-duration",
+        choices=list(DURATIONS),
+        help="evaluate one duration bucket only (900 questions), like the official --video_duration_type",
+    )
+    group.add_argument(
         "--video-mme-subtitles",
         action="store_true",
         default=None,  # None keeps it out of bench_args when not passed
@@ -332,9 +343,10 @@ def run_video_mme_benchmark(
     num_threads: int,
     video_url_template: str | None = None,
     use_subtitles: bool = False,
+    duration: str | None = None,
     predictions_writer: PredictionsWriter | None = None,
 ) -> RunResult:
-    examples = load_video_mme_examples(num_examples, use_subtitles=use_subtitles)
+    examples = load_video_mme_examples(num_examples, use_subtitles=use_subtitles, duration=duration)
     return run_examples(
         name=name,
         examples=examples,
@@ -371,6 +383,7 @@ def _run(
         num_threads=num_threads,
         video_url_template=args.get("video_url"),
         use_subtitles=bool(args.get("subtitles")),
+        duration=args.get("duration"),
         predictions_writer=predictions_writer,
     )
 

@@ -250,6 +250,8 @@ inside the Hub zips. Without it the benchmark downloads the 20
 and extracts them once into `~/.cache/sgl_eval/video_mme/`. Questions come from
 the repo's parquet via `datasets`.
 
-`--num-examples N` takes a duration-balanced sample. Default `--num-threads` is
+`--video-mme-duration short|medium|long` scores one bucket on its own (900
+questions), like the official `--video_duration_type`. `--num-examples N` takes
+a duration-balanced sample (within the bucket, if one is selected). Default `--num-threads` is
 16: every request makes the server decode and sample a video of up to an hour.
 `--from-dataset` is not supported (video inputs required).

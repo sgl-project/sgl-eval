@@ -146,6 +146,20 @@ def test_load_skips_missing_video(tmp_path, monkeypatch):
     assert [e.id for e in examples] == ["001-1"]
 
 
+def test_duration_filter(tmp_path, monkeypatch):
+    rows = [
+        _row("001-1", "vidA", "short"),
+        _row("301-1", "vidB", "medium"),
+        _row("601-1", "vidC", "long"),
+    ]
+    _write_fake_dataset(tmp_path, rows)
+    monkeypatch.setenv("SGL_EVAL_VIDEO_MME_DIR", str(tmp_path))
+    monkeypatch.setattr("sgl_eval.evals._video_mme._read_rows", lambda: rows)
+    assert [e.id for e in load_video_mme_examples(None, duration="short")] == ["001-1"]
+    assert [e.id for e in load_video_mme_examples(None, duration="long")] == ["601-1"]
+    assert [e.id for e in load_video_mme_examples(1, duration="medium")] == ["301-1"]
+
+
 def test_env_dir_without_videos_exits(tmp_path, monkeypatch):
     monkeypatch.setenv("SGL_EVAL_VIDEO_MME_DIR", str(tmp_path))
     with pytest.raises(SystemExit):
@@ -266,8 +280,15 @@ def test_registered_with_cli_args():
     parser = argparse.ArgumentParser()
     spec.add_arguments(parser.add_argument_group("video_mme"))
     ns = parser.parse_args(
-        ["--video-mme-video-url", "file:///x/{videoID}.mp4", "--video-mme-subtitles"]
+        [
+            "--video-mme-video-url",
+            "file:///x/{videoID}.mp4",
+            "--video-mme-subtitles",
+            "--video-mme-duration",
+            "short",
+        ]
     )
     assert ns.video_mme_video_url == "file:///x/{videoID}.mp4"
+    assert ns.video_mme_duration == "short"
     assert ns.video_mme_subtitles is True
     assert parser.parse_args([]).video_mme_subtitles is None
