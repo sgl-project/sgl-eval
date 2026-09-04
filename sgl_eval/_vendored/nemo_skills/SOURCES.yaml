@@ -90,6 +90,10 @@ files:
   - src: nemo_skills/dataset/utils.py
     dst: dataset/_utils.py
 
+  # --- few-shot example sets (gsm8k's default prompt is 8-shot CoT) ---
+  - src: nemo_skills/prompt/few_shot_examples/gsm8k.py
+    dst: prompt/few_shot_examples/gsm8k.py
+
   # --- per-benchmark dataset metadata + bundled data ---
   - src: nemo_skills/dataset/aime25/__init__.py
     dst: dataset/aime25/__init__.py
