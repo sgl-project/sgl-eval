@@ -16,6 +16,7 @@ an endpoint. Most need nothing.
 | `gpqa` | multichoice | Diamond split |
 | `mmmu_pro` | multichoice | VLM endpoint; MMMU-Pro `standard (10 options)` -- [see below](#mmmu-pro-variants) |
 | `mmmu_pro_vision` | multichoice | VLM endpoint; MMMU-Pro `vision` -- [see below](#mmmu-pro-variants) |
+| `video_mme` | multichoice | video-capable endpoint; Video-MME, server-side frame sampling, ~101 GB of videos -- [see below](#video-mme) |
 | `ruler2` | ruler2 | extra install, a required flag, generated data -- [see below](#ruler2) |
 
 All scoring behavior (prompt, answer extraction, grading, pass@k /
@@ -204,3 +205,53 @@ explicitly, e.g. `1048576 - 768` to reserve room to answer), and the same
 `--num-examples` is *not* a substitute for `--ruler2-dataset-size`: it slices
 the generated file (NS's `++max_samples`), it does not change what gets
 generated.
+
+---
+
+## Video-MME
+
+[Video-MME](https://github.com/MME-Benchmarks/Video-MME) (Fu et al., 2024): 2,700
+four-way multiple-choice questions over 900 videos, 300 per duration bucket
+(`short` < 2 min, `medium` 4-15 min, `long` 30-60 min), with `.srt` subtitles
+for 744 videos. `video_mme` sends each question as one `video_url` block plus
+the official prompt and lets the **served model sample frames itself** -- there
+is no client-side frame extraction, so the frame budget is whatever the
+endpoint's video processor applies (report it with your numbers).
+
+sgl-eval-own, like `mmmu_pro`: NeMo-Skills has no Video-MME module.
+
+| | source |
+|---|---|
+| prompt | official README template: `Select the best answer ... based on the video.` / `Respond with only the letter (A, B, C, or D) of the correct option.` / question / options / `The best answer is:` |
+| with subtitles (`--video-mme-subtitles`) | official header `This video's subtitles are listed below:` + caption text from the `.srt` (white `<font>` spans, one per line); videos without a subtitle file use the plain prompt |
+| answer extraction | official `extract_characters_regex` from `evaluation/eval_your_results.py` (repo @ `4e7566d36f`, the last commit that shipped it), ported verbatim including its quirks |
+| `score` | official accuracy: correct / **answered** (the official script drops unparsable responses from the denominator) |
+| `score_all` | correct / all samples (unparsable counted wrong) |
+| per duration | `task.short` / `task.medium` / `task.long` (official rule) |
+| `no_answer` | share of unparsable responses |
+| `--n-repeats k` | `pass@1[avg-of-k]` / `pass@k` / `majority@k` via the vendored `MathMetrics` (unparsable counted wrong) |
+
+**Video transport.** Videos are 2 MB - 915 MB, so the default (inline
+`data:video/mp4;base64,...`, read per request) is only practical for small
+deployments. Prefer `--video-mme-video-url TEMPLATE` to tell the *server* how
+to reach each file, with `{videoID}` / `{filename}` placeholders:
+
+```bash
+# server co-located with the data (SGLang accepts file:// and plain paths)
+sgl-eval run video_mme --base-url ... --video-mme-video-url 'file:///mnt/video-mme/data/{videoID}.mp4'
+# hosted copy
+sgl-eval run video_mme --base-url ... --video-mme-video-url 'https://files.example.org/vmme/{filename}'
+```
+
+**Data.** `SGL_EVAL_VIDEO_MME_DIR` should point at a directory holding
+`data/<videoID>.mp4` (and optionally `subtitle/<videoID>.srt`) -- the layout
+inside the Hub zips. Without it the benchmark downloads the 20
+`videos_chunked_*.zip` (~101 GB) plus `subtitle.zip` from `lmms-lab/Video-MME`
+and extracts them once into `~/.cache/sgl_eval/video_mme/`. Questions come from
+the repo's parquet via `datasets`.
+
+`--video-mme-duration short|medium|long` scores one bucket on its own (900
+questions), like the official `--video_duration_type`. `--num-examples N` takes
+a duration-balanced sample (within the bucket, if one is selected). Default `--num-threads` is
+16: every request makes the server decode and sample a video of up to an hour.
+`--from-dataset` is not supported (video inputs required).
