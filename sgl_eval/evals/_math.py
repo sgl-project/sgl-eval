@@ -34,9 +34,14 @@ def _eval_single_sync(evaluator: MathEvaluator, data_point: Dict[str, Any]) -> D
     return asyncio.run(evaluator.eval_single(data_point))
 
 
-def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig, prompt_yaml: Path) -> SampleFn:
+def make_sample_fn(
+    sampler: ChatCompletionSampler,
+    gen: GenConfig,
+    prompt_yaml: Path,
+    few_shot_examples: Optional[list] = None,
+) -> SampleFn:
     def sample_fn(ex: Example, _rep_idx: int) -> Sample:
-        prompt = render_math_prompt(prompt_yaml, ex.inputs["problem"])
+        prompt = render_math_prompt(prompt_yaml, ex.inputs["problem"], few_shot_examples)
         return sampler([{"role": "user", "content": prompt}], gen)
 
     return sample_fn
@@ -103,12 +108,13 @@ def run_math_benchmark(
     num_threads: int,
     load_examples: Callable[[Optional[int]], List[Example]],
     prompt_yaml: Path,
+    few_shot_examples: Optional[list] = None,
     evaluator_config: Optional[Dict[str, Any]] = None,
     predictions_writer: Optional[PredictionsWriter] = None,
 ) -> RunResult:
     examples = load_examples(num_examples)
     evaluator = MathEvaluator(config=evaluator_config or {})
-    sample_fn = make_sample_fn(sampler, gen, prompt_yaml)
+    sample_fn = make_sample_fn(sampler, gen, prompt_yaml, few_shot_examples)
     score_one_fn = make_score_one_fn(evaluator)
     aggregator = (
         (lambda results: aggregate_with_math_metrics(results, n_repeats)) if n_repeats > 1 else None

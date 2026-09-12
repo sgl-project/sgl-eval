@@ -19,6 +19,21 @@ _VENDORED_PROMPT_DIR = (
 _SE_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
 
+def load_few_shot_examples(spec: str) -> list:
+    """Resolve ``"<module>:<name>"`` (relative to the vendored
+    ``nemo_skills.prompt.few_shot_examples`` package) to its list of
+    ``{"problem", "solution"}`` dicts."""
+    import importlib
+
+    module_name, _, attr = spec.partition(":")
+    if not module_name or not attr:
+        raise ValueError(f"few_shot_examples spec must be '<module>:<name>', got {spec!r}")
+    module = importlib.import_module(
+        f"sgl_eval._vendored.nemo_skills.prompt.few_shot_examples.{module_name}"
+    )
+    return list(getattr(module, attr))
+
+
 def vendored_prompt(name: str) -> Path:
     """Return the path to a vendored prompt yaml by basename (no extension)."""
     return _VENDORED_PROMPT_DIR / f"{name}.yaml"
