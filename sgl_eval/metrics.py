@@ -31,6 +31,7 @@ def dump_run(
         "output_throughput_tps": result.output_throughput,
         "total_completion_tokens": result.total_completion_tokens,
         "total_prompt_tokens": result.total_prompt_tokens,
+        "token_usage": _token_usage(result),
         "aggregate": result.aggregate,
     }
     if run_meta:
@@ -60,6 +61,21 @@ def format_summary(result: RunResult) -> str:
     )
 
     rows = _build_rows(agg, k)
+    token_usage = _token_usage(result)
+    num_samples = sum(len(r.samples) for r in result.per_example)
+    for field, label in (
+        ("prompt_tokens", "avg_input_tokens"),
+        ("completion_tokens", "avg_output_tokens"),
+        ("reasoning_tokens", "avg_thinking_tokens"),
+    ):
+        stats = token_usage[field]
+        mean = stats["mean"]
+        value = f"{mean:,.1f} tokens" if mean is not None else "N/A"
+        count = stats["count"]
+        note = (
+            f"usage reported for {count}/{num_samples} samples" if 0 < count < num_samples else None
+        )
+        rows.append((False, label, value, note))
     label_w = max(len(label) for _, label, _, _ in rows) if rows else 0
 
     lines = [f"== {result.name} ==", meta, ""]
@@ -68,6 +84,20 @@ def format_summary(result: RunResult) -> str:
         note_str = f"  [{note}]" if note else ""
         lines.append(f"{marker} {label:<{label_w}}  =  {value}{note_str}")
     return "\n".join(lines)
+
+
+def _token_usage(result: RunResult) -> Dict[str, Dict[str, Any]]:
+    """Average each usage field over reported values, retaining explicit zeros."""
+    samples = [sample for r in result.per_example for sample in r.samples]
+    usage = {}
+    for field in ("prompt_tokens", "completion_tokens", "reasoning_tokens"):
+        values = [getattr(sample, field) for sample in samples]
+        reported = [value for value in values if value is not None]
+        usage[field] = {
+            "mean": sum(reported) / len(reported) if reported else None,
+            "count": len(reported),
+        }
+    return usage
 
 
 def _fmt_tokens(n: int) -> str:
