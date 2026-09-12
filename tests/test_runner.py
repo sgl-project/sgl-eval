@@ -47,6 +47,38 @@ def test_runner_basic():
     assert result.output_throughput > 0
 
 
+@pytest.mark.parametrize("num_threads", [1, 4])
+def test_runner_rejects_duplicate_ids_before_sampling(num_threads):
+    """IDs key the runner's per-example storage, so duplicates would make
+    one example overwrite another's samples and scores."""
+    examples = [
+        Example(id="dup", inputs={}, target="a"),
+        Example(id="unique", inputs={}, target="b"),
+        Example(id="dup", inputs={}, target="c"),
+    ]
+    sampled = []
+
+    def sample_fn(ex, rep_idx):
+        sampled.append((ex.id, rep_idx))
+        return Sample(text=str(ex.target), completion_tokens=1, finish_reason="stop")
+
+    with pytest.raises(
+        ValueError,
+        match=r"duplicate example id 'dup' at positions 0 and 2; ids must be unique within a run",
+    ):
+        run_examples(
+            "duplicate-ids",
+            examples,
+            sample_fn,
+            _all_correct_score_one_fn,
+            num_threads=num_threads,
+            n_repeats=2,
+            progress=False,
+        )
+
+    assert sampled == []
+
+
 def test_runner_partial_correct():
     examples = [Example(id=str(i), inputs={}, target="ok") for i in range(10)]
     result = run_examples(
