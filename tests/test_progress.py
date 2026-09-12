@@ -3,7 +3,6 @@
 import io
 
 import pytest
-from tqdm import tqdm
 
 from sgl_eval.runner import _progress as progress
 from sgl_eval.runner import run_examples
@@ -13,13 +12,14 @@ from sgl_eval.types import Example, Sample
 @pytest.fixture
 def bars(monkeypatch):
     created = []
+    bar_class = progress._ProgressBar
 
     def make_bar(*args, **kwargs):
-        bar = tqdm(*args, **kwargs, file=io.StringIO(), mininterval=0)
+        bar = bar_class(*args, **kwargs, file=io.StringIO(), mininterval=0)
         created.append(bar)
         return bar
 
-    monkeypatch.setattr(progress, "tqdm", make_bar)
+    monkeypatch.setattr(progress, "_ProgressBar", make_bar)
     return created
 
 
@@ -74,3 +74,34 @@ def test_disabled_progress_accepts_finish_reason():
     bars, tick = progress._build_progress("test", 1, 1, enabled=False)
     tick(0, 0.0, "length")
     assert bars == []
+
+
+@pytest.mark.parametrize("n_repeats", [1, 16])
+def test_rendered_statistics_survive_terminal_resize(bars, n_repeats):
+    _, tick = progress._build_progress("gpqa", 198, n_repeats, enabled=True)
+    try:
+        for rep in range(n_repeats):
+            for i in range(197):
+                tick(rep, 1.0, "length" if i == 0 else "stop")
+        for bar in bars:
+            bar.dynamic_ncols = False
+            for columns in [80, 120, 80]:
+                bar.ncols = columns
+                values = dict(bar.format_dict, elapsed=500, rate=0.3)
+                rendered = bar.format_meter(**values)
+                assert len(rendered) <= columns
+                assert bar.desc.strip() in rendered
+                assert f"{bar.n}/{bar.total}" in rendered
+                assert "acc=100.00%" in rendered
+                assert bar.postfix in rendered
+                remaining = bar.format_interval((bar.total - bar.n) / 0.3)
+                assert f"[08:20<{remaining}" in rendered
+                if columns == 80:
+                    assert values["bar_format"] is not None
+                    assert "s/it" not in rendered
+                else:
+                    assert values["bar_format"] is None
+                    assert "s/it" in rendered
+    finally:
+        for bar in bars:
+            bar.close()

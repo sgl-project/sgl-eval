@@ -11,6 +11,18 @@ from tqdm import tqdm
 TickFn = Callable[[int, float, Optional[str]], None]
 
 
+class _ProgressBar(tqdm):
+    @property
+    def format_dict(self):
+        values = super().format_dict
+        if values["ncols"] and values["ncols"] < 100:
+            # Keep statistics and elapsed/ETA ahead of the bar on narrow terminals.
+            values["bar_format"] = (
+                "{desc}: {n_fmt}/{total_fmt}{postfix} [{elapsed}<{remaining}] {bar}"
+            )
+        return values
+
+
 @dataclass
 class _ProgressCounts:
     correct: float = 0.0
@@ -40,7 +52,7 @@ def _build_progress(
         return [], lambda _idx, _score, _finish_reason: None
 
     if n_repeats <= 1:
-        bar = tqdm(total=num_examples, desc=name, dynamic_ncols=True)
+        bar = _ProgressBar(total=num_examples, desc=name, dynamic_ncols=True)
         counts = _ProgressCounts()
 
         def tick(_rep_idx: int, score: float, finish_reason: Optional[str]) -> None:
@@ -52,7 +64,7 @@ def _build_progress(
     width = len(str(n_repeats))
     prefix_len = len(f"rep {n_repeats}/{n_repeats}")
     rep_bars = [
-        tqdm(
+        _ProgressBar(
             total=num_examples,
             desc=f"{name} rep {i + 1:>{width}}/{n_repeats}",
             position=i,
@@ -62,7 +74,7 @@ def _build_progress(
         for i in range(n_repeats)
     ]
     overall_label = "overall".ljust(prefix_len)
-    overall_bar = tqdm(
+    overall_bar = _ProgressBar(
         total=num_examples * n_repeats,
         desc=f"{name} {overall_label}",
         position=n_repeats,
