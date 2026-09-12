@@ -25,7 +25,7 @@ class WorkerAborted(Exception):
     the transport). Runner drops the pair and sets ``RunResult.partial``."""
 
 
-TickFn = Callable[[int, float], None]
+TickFn = Callable[[int, float, Optional[str]], None]
 SampleFn = Callable[..., Sample]
 ScoreOneFn = Callable[[Example, Sample], Tuple[float, Optional[str]]]
 # Streaming-dump hook; fires on whatever thread completed the future, so
