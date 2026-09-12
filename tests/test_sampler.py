@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from types import SimpleNamespace
 
 import pytest
 
+from sgl_eval import sampler as sampler_module
 from sgl_eval.runner import WorkerAborted
 from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import GenConfig
@@ -34,6 +36,57 @@ def _stub_response(
         ],
         usage=SimpleNamespace(**usage_kw),
     )
+
+
+@pytest.mark.parametrize(
+    "soft, hard, expected",
+    [
+        pytest.param(1024, 1_048_576, 65_535, id="raise"),
+        pytest.param(1024, 4096, 4096, id="hard-cap"),
+        pytest.param(1024, -1, 65_535, id="unlimited-hard"),
+        pytest.param(131072, 1_048_576, None, id="already-sufficient"),
+    ],
+)
+def test_nofile_soft_limit(monkeypatch, soft, hard, expected):
+    calls = []
+    fake_resource = SimpleNamespace(
+        RLIMIT_NOFILE=7,
+        RLIM_INFINITY=-1,
+        getrlimit=lambda _: (soft, hard),
+        setrlimit=lambda resource_type, limits: calls.append((resource_type, limits)),
+    )
+    monkeypatch.setattr(sampler_module, "resource", fake_resource)
+
+    sampler_module._raise_nofile_soft_limit()
+
+    assert calls == ([] if expected is None else [(7, (expected, hard))])
+
+
+def test_nofile_soft_limit_is_a_noop_without_resource(monkeypatch):
+    monkeypatch.setattr(sampler_module, "resource", None)
+
+    sampler_module._raise_nofile_soft_limit()
+
+
+@pytest.mark.parametrize("operation", ["getrlimit", "setrlimit"])
+def test_nofile_soft_limit_logs_and_continues_on_resource_error(monkeypatch, caplog, operation):
+    def raise_oserror(*_args):
+        raise OSError("not permitted")
+
+    fake_resource = SimpleNamespace(
+        RLIMIT_NOFILE=7,
+        RLIM_INFINITY=-1,
+        getrlimit=lambda _: (1024, 1_048_576),
+        setrlimit=lambda *_: None,
+    )
+    setattr(fake_resource, operation, raise_oserror)
+    monkeypatch.setattr(sampler_module, "resource", fake_resource)
+
+    with caplog.at_level(logging.WARNING):
+        sampler_module._raise_nofile_soft_limit()
+
+    assert "RLIMIT_NOFILE" in caplog.text
+    assert "not permitted" in caplog.text
 
 
 @pytest.fixture

@@ -7,6 +7,11 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+try:
+    import resource
+except ImportError:  # pragma: no cover - unavailable on Windows
+    resource = None
+
 import httpx
 import openai
 from openai import OpenAI
@@ -20,6 +25,25 @@ LOG = logging.getLogger(__name__)
 # Above any plausible --num-threads; httpx's default 100 would silently cap
 # concurrency below what the runner was told to use.
 _MAX_CONNECTIONS = 3600
+_TARGET_NOFILE = 65_535
+
+
+def _raise_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
+    """Leave room for concurrent HTTP sockets and asyncio selectors."""
+    if resource is None:
+        return
+    try:
+        current_soft, current_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        desired_soft = (
+            target if current_hard == resource.RLIM_INFINITY else min(target, current_hard)
+        )
+        if current_soft == resource.RLIM_INFINITY or current_soft >= desired_soft:
+            return
+        resource.setrlimit(resource.RLIMIT_NOFILE, (desired_soft, current_hard))
+    except (OSError, ValueError) as exc:
+        LOG.warning("Could not raise RLIMIT_NOFILE: %s", exc)
+    else:
+        LOG.info("Raised RLIMIT_NOFILE soft limit from %d to %d", current_soft, desired_soft)
 
 
 class _LargeHttpxClient(httpx.Client):
@@ -43,6 +67,7 @@ class ChatCompletionSampler:
         api_key: str = "EMPTY",
         max_retries: int = 6,
     ) -> None:
+        _raise_nofile_soft_limit()
         # Hold the httpx client directly so ``abort()`` can close it without
         # reaching into ``OpenAI``'s private ``_client`` attribute.
         self._http = _LargeHttpxClient()
