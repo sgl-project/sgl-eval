@@ -22,7 +22,13 @@ def _ex(i: int) -> Example:
 
 
 def _sample(text: str = "ans", completion: int = 10) -> Sample:
-    return Sample(text=text, completion_tokens=completion, prompt_tokens=5, finish_reason="stop")
+    return Sample(
+        text=text,
+        reasoning_content="reasoning",
+        completion_tokens=completion,
+        prompt_tokens=5,
+        finish_reason="stop",
+    )
 
 
 def test_writes_ns_shape_record(tmp_path: Path) -> None:
@@ -34,6 +40,7 @@ def test_writes_ns_shape_record(tmp_path: Path) -> None:
     r = rows[0]
     assert r["id"] == "0"
     assert r["generation"] == "response-A"
+    assert r["reasoning_content"] == "reasoning"
     assert r["expected_answer"] == "0"
     assert r["problem"] == "q0"
     assert r["predicted_answer"] == "42"

@@ -18,14 +18,23 @@ from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import GenConfig
 
 
-def _stub_response(text: str, completion: int = 7, prompt: int = 11, reasoning: int | None = None):
+def _stub_response(
+    text: str,
+    completion: int = 7,
+    prompt: int = 11,
+    reasoning: int | None = None,
+    reasoning_content: str | None = None,
+    sglang_reasoning: int | None = None,
+):
     usage_kw = {"completion_tokens": completion, "prompt_tokens": prompt}
     if reasoning is not None:
         usage_kw["completion_tokens_details"] = SimpleNamespace(reasoning_tokens=reasoning)
+    if sglang_reasoning is not None:
+        usage_kw["reasoning_tokens"] = sglang_reasoning
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(content=text),
+                message=SimpleNamespace(content=text, reasoning_content=reasoning_content),
                 finish_reason="stop",
             )
         ],
@@ -101,6 +110,29 @@ def test_reasoning_tokens_extracted(sampler):
     out = sampler([{"role": "user", "content": "hi"}])
     assert out.completion_tokens == 20
     assert out.reasoning_tokens == 15
+
+
+def test_sglang_reasoning_fields_extracted(sampler):
+    """SGLang exposes reasoning text on the message and, in older releases,
+    its token count directly on usage."""
+    sampler.client.chat.completions.create = lambda **_: _stub_response(
+        "answer",
+        completion=20,
+        reasoning_content="thinking",
+        sglang_reasoning=15,
+    )
+    out = sampler([{"role": "user", "content": "hi"}])
+    assert out.text == "answer"
+    assert out.reasoning_content == "thinking"
+    assert out.reasoning_tokens == 15
+
+
+def test_standard_reasoning_token_count_takes_precedence(sampler):
+    sampler.client.chat.completions.create = lambda **_: _stub_response(
+        "answer", reasoning=12, sglang_reasoning=10
+    )
+    out = sampler([{"role": "user", "content": "hi"}])
+    assert out.reasoning_tokens == 12
 
 
 def test_abort_before_call_raises(sampler):
