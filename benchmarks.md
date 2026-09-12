@@ -17,10 +17,12 @@ an endpoint. Most need nothing.
 | `mmmu_pro` | multichoice | VLM endpoint; MMMU-Pro `standard (10 options)` -- [see below](#mmmu-pro-variants) |
 | `mmmu_pro_vision` | multichoice | VLM endpoint; MMMU-Pro `vision` -- [see below](#mmmu-pro-variants) |
 | `ruler2` | ruler2 | extra install, a required flag, generated data -- [see below](#ruler2) |
+| `mmau` | audio | audio-capable endpoint, extra install -- [see below](#mmau) |
 
 All scoring behavior (prompt, answer extraction, grading, pass@k /
-majority@k aggregation) comes from the vendored NeMo-Skills slice, whatever
-the benchmark.
+majority@k aggregation) comes from the vendored NeMo-Skills slice, with one
+exception: `mmau` has no NeMo-Skills upstream, so its (official-protocol)
+scorer lives in `sgl_eval/evals/_mmau.py`.
 
 ---
 
@@ -204,3 +206,27 @@ explicitly, e.g. `1048576 - 768` to reserve room to answer), and the same
 `--num-examples` is *not* a substitute for `--ruler2-dataset-size`: it slices
 the generated file (NS's `++max_samples`), it does not change what gets
 generated.
+
+---
+
+## mmau
+
+MMAU v05.15.25 test-mini: 1000 audio multiple-choice questions across sound
+/ music / speech, fetched from `gamma-lab-umd/MMAU-test-mini` and served to
+an audio-capable endpoint as 16 kHz mono WAV data URLs.
+
+```bash
+pip install 'sgl-eval[audio]'      # librosa, soundfile
+
+sgl-eval run mmau --base-url http://localhost:30000/v1
+# stochastic 32-repeat protocol (mean +/- std):
+sgl-eval run mmau --base-url http://localhost:30000/v1 --n-repeats 32 --temperature 1.0
+```
+
+The summary prints the overall accuracy plus a per-task breakdown
+(`sound` / `music` / `speech`), rendered the same way as ruler2's subtasks.
+
+`--num-examples N` round-robins across the three tasks (the parquet is
+grouped by task, so a head-slice would smoke-test only one). Two flags do
+not apply: `--prompt` (the instruction is fixed by the official MMAU
+protocol) and `--from-dataset` (NS-shape rows carry no audio).

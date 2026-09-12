@@ -64,9 +64,22 @@ def test_mixed_image_and_video():
     assert [b["type"] for b in content] == ["text", "image_url", "video_url"]
 
 
+def test_audio_appended_as_audio_url_block():
+    media = [MediaItem(kind="audio", data=b"a", mime="audio/wav")]
+    content = build_user_content("q", media)
+    assert [b["type"] for b in content] == ["text", "audio_url"]
+    assert content[1]["audio_url"]["url"].startswith("data:audio/wav;base64,")
+
+
+def test_audio_url_passthrough():
+    media = [MediaItem(kind="audio", url="https://x/a.wav")]
+    content = build_user_content("q", media)
+    assert content[1] == {"type": "audio_url", "audio_url": {"url": "https://x/a.wav"}}
+
+
 def test_unsupported_kind_raises():
     with pytest.raises(ValueError, match="unsupported media kind"):
-        build_user_content("q", [MediaItem(kind="audio", data=b"x")])
+        build_user_content("q", [MediaItem(kind="file", data=b"x")])
 
 
 def test_image_inserted_at_placeholder_preserves_order():

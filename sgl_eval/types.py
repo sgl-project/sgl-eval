@@ -54,14 +54,14 @@ class Sample:
 
 @dataclass
 class MediaItem:
-    """One input media attachment (image/video). ``kind`` selects the message
-    block; ``data`` (raw bytes) is used for images via base64 data URL, ``url``
-    for video (too large to inline) or pre-hosted images."""
+    """One input media attachment (image/video/audio). ``kind`` selects the
+    message block; ``data`` (raw bytes) is used for images/audio via base64
+    data URL, ``url`` for video (too large to inline) or pre-hosted media."""
 
-    kind: str  # "image" | "video"
+    kind: str  # "image" | "video" | "audio"
     data: bytes = b""
     url: str = ""
-    mime: str = ""  # "image/png" | "video/mp4" | ...
+    mime: str = ""  # "image/png" | "video/mp4" | "audio/wav" | ...
 
 
 @dataclass
