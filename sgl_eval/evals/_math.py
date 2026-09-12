@@ -33,10 +33,6 @@ def _eval_single_sync(evaluator: MathEvaluator, data_point: Dict[str, Any]) -> D
 
 
 def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig, prompt_yaml: Path) -> SampleFn:
-    prompt_config = yaml.safe_load(prompt_yaml.read_text())
-    if prompt_config.get("system") is not None:
-        gen = replace(gen, system_message=prompt_config["system"].format())
-
     def sample_fn(ex: Example, _rep_idx: int) -> Sample:
         prompt = render_math_prompt(prompt_yaml, ex.inputs["problem"])
         return sampler([{"role": "user", "content": prompt}], gen)
@@ -105,9 +101,12 @@ def run_math_benchmark(
     evaluator_config: Optional[Dict[str, Any]] = None,
     predictions_writer: Optional[PredictionsWriter] = None,
 ) -> RunResult:
+    prompt_config = yaml.safe_load(prompt_yaml.read_text())
+    if prompt_config.get("system") is not None:
+        gen = replace(gen, system_message=prompt_config["system"].format())
     if evaluator_config is None:
-        prompt_config = yaml.safe_load(prompt_yaml.read_text())
         evaluator_config = prompt_config.get("evaluator_config", {})
+
     evaluator = MathEvaluator(config=evaluator_config or {})
     sample_fn = make_sample_fn(sampler, gen, prompt_yaml)
     examples = load_examples(num_examples)
