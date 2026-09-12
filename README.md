@@ -43,6 +43,15 @@ provenance (model, endpoint, sampling config, vendored NS commit) as
   no_answer          =  20.00%  [warn: consider --max-tokens]
 ```
 
+The summary also shows `avg_input_tokens`, `avg_output_tokens`, and
+`avg_thinking_tokens` from the endpoint's usage counts. Output uses
+`completion_tokens`, including thinking tokens when the endpoint counts
+them there. Each average includes only samples reporting that field;
+missing usage shows `N/A`, and partial coverage shows the sample count.
+`metrics.json` stores each field's `mean` and contributing `count` under
+`token_usage`. Truncated responses contribute their reported token counts;
+unfinished requests do not contribute.
+
 While the run is going, the progress bar carries a live accuracy. For a
 sanity check that is usually the whole point: watch it, decide, stop.
 
