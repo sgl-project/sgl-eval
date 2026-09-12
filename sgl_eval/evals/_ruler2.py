@@ -1,22 +1,8 @@
-"""Glue between sgl-eval's sampler/runner and the vendored NeMo-Skills RULER2
-pieces (``eval_ruler2`` / ``eval_mcq``, ``Ruler2Metrics``, ``compute_score``).
+"""Adapt vendored RULER2 generation, graders, and metrics to the runner.
 
-RULER2 differs from the math/mcq benchmarks in three ways that shape this file:
-
-  - **The dataset is generated, not downloaded**, and is bound to a specific
-    (tokenizer, sequence length) pair -- so both are part of the cache key.
-  - **It is a group of 12 subtasks** whose graders differ. Which grader a
-    subtask uses is read back from the vendored ``prepare_task_for_ns`` rather
-    than duplicated here.
-  - **The prompt is pre-assembled** by the prepare scripts, so the prompt
-    config (``generic/default``) is a bare ``{question}`` passthrough.
-
-Pipeline mirror:
-  - Stage 1 (dataset): vendored ``prepare_<task>`` -> ``~/.cache/sgl_eval/ruler2/<setup>/``
-  - Stage 2a (prompt render): vendored ``prompts/default.yaml``
-  - Stage 2c (extract + score): vendored ``eval_ruler2`` or ``eval_mcq``
-  - Stage 4 (aggregate): vendored ``Ruler2Metrics`` per subtask, then vendored
-    ``ruler2_score.compute_score`` for the 12-task headline.
+Datasets depend on the tokenizer and sequence length and contain assembled
+prompts. Each task selects its grader through vendored prepare_task_for_ns;
+Ruler2Metrics feeds the full-group compute_score aggregation.
 """
 
 from __future__ import annotations
@@ -62,10 +48,7 @@ from sgl_eval.types import (  # noqa: E402
 
 _CACHE_ROOT = Path.home() / ".cache" / "sgl_eval" / "ruler2"
 
-# Order and membership must match the vendored ``compute_score``, which
-# KeyErrors on a missing task. Each name also has to resolve to a
-# ``prepare_<task>`` in the vendored prepare module -- both are asserted by
-# tests/test_ruler2.py rather than trusted.
+# Membership must match vendored compute_score and the prepare_<task> functions.
 ALL_TASKS: Tuple[str, ...] = (
     "mk_niah_basic",
     "mk_niah_easy",
@@ -100,14 +83,10 @@ _MISSING_DEPS_HINT = (
 
 @dataclass(frozen=True)
 class Ruler2Config:
-    """Generation-side knobs. Every field is passed straight through to the
-    vendored ``prepare_<task>``, so a given config reproduces NeMo-Skills'
-    dataset byte for byte (its ``random_seed`` is fixed at 42 upstream).
+    """Inputs passed unchanged to vendored dataset generation.
 
-    sgl-eval deliberately adds no knob that changes the produced data:
-    ``max_seq_length`` decides the dataset and therefore the score, which puts
-    it under the vendoring rule. Fitting the prompts into a server is the
-    preflight check's job, not the dataset's.
+    Sequence length defines the benchmark; endpoint capacity is checked
+    separately and must not shrink the generated context.
     """
 
     max_seq_length: int
@@ -127,9 +106,7 @@ class Ruler2Config:
 
     @classmethod
     def from_bench_args(cls, bench_args: Optional[Dict[str, Any]], *, model: str) -> "Ruler2Config":
-        """Values arrive already typed and range-checked by ``add_arguments``.
-        The one rule argparse cannot express is "required, but only when this
-        benchmark is the one being run"."""
+        """CLI parsing validates values; sequence length is required only for RULER2."""
         args = dict(bench_args or {})
         if args.get("seq_len") is None:
             sys.exit(
@@ -157,9 +134,6 @@ def _positive_int(raw: str) -> int:
 
 
 def add_arguments(group: Any) -> None:
-    """ruler2's own CLI surface. Wired via ``EvalSpec.add_arguments``, so
-    ``sgl-eval run --help`` documents these and argparse rejects a bad value
-    before a run starts."""
     group.add_argument(
         "--ruler2-seq-len",
         type=_positive_int,
@@ -194,8 +168,7 @@ def add_arguments(group: Any) -> None:
 
 
 def _grader_for(cfg: Ruler2Config, task: str) -> Tuple[str, str]:
-    """``(eval_type, match_type)`` for one subtask, read back from the vendored
-    ``prepare_task_for_ns`` so the grader mapping is never duplicated here."""
+    """Read the grader mapping from vendored prepare_task_for_ns output."""
     _prepare.prepare_task_for_ns(str(cfg.cache_dir), task)
     init_py = cfg.cache_dir / task / "__init__.py"
     namespace: Dict[str, Any] = {}
@@ -211,9 +184,7 @@ def _grader_for(cfg: Ruler2Config, task: str) -> Tuple[str, str]:
 
 
 def _ensure_task_data(cfg: Ruler2Config, task: str) -> Path:
-    """Generate ``<cache>/<task>/test.jsonl`` once. Calls the per-task
-    ``prepare_<task>`` directly: ``prepare_dataset`` hardcodes its output to
-    ``Path(__file__).parent / setup``, i.e. inside ``_vendored``."""
+    """Call per-task generators to avoid prepare_dataset writing into _vendored."""
     task_dir = cfg.cache_dir / task
     out_path = task_dir / "test.jsonl"
     if out_path.exists():
@@ -307,9 +278,7 @@ def _make_score_one_fn(eval_type: str, match_type: str):
 
 
 def _task_metrics(results: List[ExampleResult], n_repeats: int, eval_type: str) -> Dict[str, Any]:
-    """Vendored ``Ruler2Metrics`` over one subtask. It reads ``is_correct``
-    (float) or ``symbolic_correct`` (bool) depending on the grader, so the
-    score field has to match what that subtask's evaluator produced."""
+    """Ruler2Metrics expects is_correct floats or symbolic_correct booleans."""
     metrics = Ruler2Metrics()
     for r in results:
         preds = []
@@ -328,12 +297,9 @@ def _task_metrics(results: List[ExampleResult], n_repeats: int, eval_type: str) 
 
 
 def _headline(per_task: Dict[str, Dict[str, Any]], k: int, *, namespace: str) -> Dict[str, float]:
-    """Flatten to the ``Dict[str, float]`` shape ``format_summary`` renders.
+    """Use vendored compute_score for a complete group; flag locally averaged subsets.
 
-    The full-group average comes from vendored ``compute_score``, which raises on
-    a missing task; anything short of 12 is averaged here and flagged
-    ``task_subset``. Gate on what completed, not what was requested -- a run
-    aborted at task 5 needs the same fallback as ``tasks=a,b``.
+    Completeness depends on finished tasks, including when a full run is aborted.
     """
     agg_key = "pass@1" if k == 1 else f"pass@1[avg-of-{k}]"
     flat: Dict[str, float] = {}
@@ -354,25 +320,17 @@ def _headline(per_task: Dict[str, Dict[str, Any]], k: int, *, namespace: str) ->
     return flat
 
 
-# Minimum room the endpoint must leave for the answer when ``max_tokens`` is
-# unset. This is a PREFLIGHT THRESHOLD, not a dataset knob: it never changes
-# what gets generated, it only decides whether we refuse to start. RULER2
-# answers are short (a needle, a letter, a span), so this is generous.
+# Arbitrary answer headroom for preflight when max_tokens is unset;
+# this threshold does not change the generated dataset.
 _MIN_GEN_BUDGET = 512
 
 
 def _preflight_context_length(
     sampler: ChatCompletionSampler, cfg: Ruler2Config, gen: GenConfig
 ) -> None:
-    """Refuse to spend hours on a server that cannot hold prompt + answer.
+    """Require room for the generated prompt and answer when the endpoint reports a limit.
 
-    Two ways this bites, both silent: a window below ``seq_len`` makes every
-    request 400, and a window equal to ``seq_len`` leaves zero room to generate
-    when ``max_tokens`` is None. The sampler turns both into empty samples
-    scoring 0, so the run completes with all-zero metrics and exit code 0.
-
-    Warn (do not fail) when the endpoint does not expose its limit -- refusing
-    to run against a server we cannot introspect would be worse.
+    An unreadable limit warns; a known insufficient limit fails before sampling.
     """
     import httpx
 

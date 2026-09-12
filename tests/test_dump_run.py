@@ -1,13 +1,4 @@
-"""Tests for ``dump_run``: folder layout + run_meta merge contract.
-
-Covers what ``cli.cmd_run`` and any future programmatic caller depends on:
-  - writes ``<out_dir>/metrics.json`` (folder layout, not flat file)
-  - core RunResult fields land in payload at expected keys
-  - run_meta is merged into the top level alongside core fields
-  - run_meta MUST NOT silently override reserved fields -- this is the
-    safety net for the ``payload.update(run_meta)`` design
-  - ensure_ascii=False keeps unicode in run_meta human-readable
-"""
+"""Check metric serialization, reserved-field protection, and summary output."""
 
 from __future__ import annotations
 

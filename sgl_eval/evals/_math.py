@@ -1,10 +1,7 @@
-"""Glue between sgl-eval's sampler/runner and the vendored NeMo-Skills math
-evaluator.
+"""Adapt the runner to vendored MathEvaluator and MathMetrics.
 
-Mirrors NS pipeline stages:
-  - Stage 2a (prompt render): the benchmark's prompt yaml + ``str.format``.
-  - Stage 2c (extract + score): vendored ``MathEvaluator.eval_single``.
-  - Stage 4 (aggregate): vendored ``MathMetrics.update`` + ``get_metrics``.
+Prompts come from vendored YAML; evaluator calls bridge async to sync, and
+Sample records are converted to the NeMo-Skills prediction schema.
 """
 
 from __future__ import annotations
@@ -29,8 +26,6 @@ def render_math_prompt(
 
 
 def _eval_single_sync(evaluator: MathEvaluator, data_point: Dict[str, Any]) -> Dict[str, Any]:
-    """Drive ``MathEvaluator.eval_single`` (an ``async def``) synchronously.
-    Body is pure-CPU for math, so per-call event-loop overhead is negligible."""
     return asyncio.run(evaluator.eval_single(data_point))
 
 
@@ -70,10 +65,7 @@ def aggregate_with_math_metrics(results: List[ExampleResult], n_repeats: int) ->
 
 
 def _flatten_math_metrics(raw: Dict[str, Any], k: int) -> Dict[str, float]:
-    """Pull headline numbers (and per-run std / SEM when ``k > 1``) out of
-    ``MathMetrics``' nested output. Values normalized to [0, 1]. ``score``
-    aliases the headline (``pass@1[avg-of-k]`` when ``k > 1``, plain
-    ``pass@1`` when ``k == 1``)."""
+    """Normalize percentage metrics to [0, 1]; score aliases the pass@1 headline."""
     flat: Dict[str, float] = {}
     if k == 1:
         per_q = raw.get("pass@1", {})

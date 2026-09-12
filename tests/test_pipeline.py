@@ -1,10 +1,4 @@
-"""End-to-end pipeline test against a stub sampler.
-
-Doesn't hit any network: monkeypatches ``ChatCompletionSampler`` to return
-a canned ``Sample`` and runs a tiny custom EvalSpec through the runner.
-Validates that the registry / runner / aggregator wiring works without
-relying on a real model or HF dataset download.
-"""
+"""Exercise math and multichoice runners with stub samplers and synthetic datasets."""
 
 from __future__ import annotations
 

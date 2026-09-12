@@ -1,8 +1,4 @@
-"""Smoke tests for the vendored math chain. ``math_equal`` / ``extract_answer``
-are exhaustively covered by the vendored NS slice's own ``test_math_equal``;
-we keep only what's NOT covered there: our ``relaxed`` flag config and the
-``MathMetrics`` integration we actually call into.
-"""
+"""Smoke checks for vendored modulo comparison, regex extraction, and metrics output."""
 
 from __future__ import annotations
 
@@ -11,14 +7,12 @@ from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
 
 
 def test_math_equal_take_modulo_param():
-    """``take_modulo`` is supported by the vendored grader. sgl-eval does
-    not currently pass it (upstream's aime configs don't either), but the
-    parameter exists and we exercise it as a unit test."""
+    """Modulo comparison is an upstream grader option, unused by SE defaults."""
     assert math_equal("42", "1042", take_modulo=1000)
 
 
 def test_extract_answer_relaxed_falls_back():
-    """relaxed=True tries the regex first then boxed."""
+    """Relaxed extraction must accept the configured answer prefix without a box."""
     assert extract_answer("The final answer is 7", relaxed=True) == "7"
 
 

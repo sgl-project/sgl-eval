@@ -1,26 +1,7 @@
-"""Generic dataset loaders for vendored NeMo-Skills benchmarks.
+"""Load bundled NeMo-Skills JSONL or cache the output of vendored prepare scripts.
 
-Two patterns are needed across the current benchmark set:
-
-  - **bundled**: data ships in the upstream repo (aime24/aime25 each have a
-    ``test.txt`` jsonl beside ``prepare.py``). The vendored ``test.txt`` is
-    read directly.
-
-  - **prepare**: data is downloaded by upstream's ``prepare.py`` (gsm8k from
-    openai/grade-school-math, mmlu from a pinned CAIS archive, and gpqa and
-    mmlu_pro from HuggingFace). We invoke it once, move its output to
-    ``~/.cache/sgl_eval/<name>/``, and serve from cache on subsequent runs.
-    Upstream's entry point is not uniform -- most expose ``save_data(split,
-    ...)``, mmlu-pro only an argparse ``main(args)`` -- so ``argparse_main``
-    selects the call shape.
-
-A multimodal **prepare** benchmark also writes a media sidecar dir beside its
-jsonl and references it by relative path (mmmu_pro_vision -> ``images/`` +
-``image_path``); see ``load_via_prepare``.
-
-``--num-examples N`` keeps the first N rows, matching upstream's ``max_samples``.
-A benchmark whose jsonl is grouped rather than shuffled declares ``sample_seed``
-instead, or a small N scores one group only.
+Multimodal prepare scripts write media beside the JSONL; both must move to the
+same cache directory so relative media paths remain valid.
 """
 
 from __future__ import annotations
@@ -72,9 +53,7 @@ def _row_to_example(
 
 
 def _row_media(row: dict, media_field: str, base_dir: Path) -> List[MediaItem]:
-    """A missing media file is a corrupt cache, not a data variation -- fail
-    loudly rather than silently evaluating a screenshot benchmark as text (the
-    failure mode behind MMMU-Pro's original 9% baseline)."""
+    """Missing referenced media is a corrupt cache; a screenshot task cannot run as text."""
     rel = row.get(media_field)
     if not rel:
         return []
@@ -174,18 +153,13 @@ def load_via_prepare(
     archive_url: Optional[str] = None,
     archive_sha256: Optional[str] = None,
 ) -> Callable[[Optional[int]], List[Example]]:
-    """Loader that runs vendored ``<name>/prepare.py`` once and caches the
-    resulting JSONL.
+    """Cache vendored prepare output, including its optional media sidecar.
 
-    ``media_dir`` is a sidecar dir ``save_data`` writes beside the jsonl;
-    ``media_field`` is the jsonl column pointing into it. Both land in the cache
-    dir together so the relative paths keep resolving.
+    ``media_dir`` is relative to the prepare module; ``media_field`` names the
+    JSONL column whose paths are resolved against the cache directory.
 
-    ``sample_seed`` makes ``num_examples`` a seeded sample of the whole split
-    rather than its first N rows.
-
-    ``archive_url`` is fetched and digest-checked here, then handed to the
-    vendored script by pointing its module-level ``URL`` at the local copy.
+    ``sample_seed`` samples the whole split instead of its first rows.
+    ``archive_url`` is digest-checked before the prepare script reads it.
     """
     save_kwargs = save_kwargs or {}
     if bool(archive_url) != bool(archive_sha256):
@@ -217,8 +191,8 @@ def load_via_prepare(
                 mod.save_data(*save_args, **save_kwargs)
             cache_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(vendored_dir / output_basename), str(cache_path))
-            # save_data's data_dir is `Path(__file__).parent`, i.e. inside
-            # _vendored -- the sidecar has to come out with the jsonl.
+            # save_data writes beside __file__; move media with the JSONL
+            # to preserve its relative paths in the cache.
             if media_dir:
                 _move_tree(vendored_dir / media_dir, cache_dir / media_dir)
         return _read_jsonl(cache_path, name, num_examples, media_field, cache_dir, sample_seed)

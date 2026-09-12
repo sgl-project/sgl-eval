@@ -1,10 +1,4 @@
-"""Sampler integration tests using a stub OpenAI client.
-
-We don't hit a real server here (no fixtures for that). Instead we verify
-the sampler builds the right request kwargs and unpacks responses into a
-``Sample``. End-to-end against a live SGLang server is tested manually via
-``sgl-eval ping --base-url ...``.
-"""
+"""Check request and response contracts with a stub OpenAI client; no server required."""
 
 from __future__ import annotations
 
@@ -77,10 +71,7 @@ def test_chat_template_kwargs_become_extra_body(sampler):
 
 
 def test_min_p_and_repetition_penalty_always_sent(sampler):
-    """Both are NS ``InferenceConfig`` fields. Left unsent, sglang resolves
-    them from the served model's generation_config.json -- so a model shipping
-    e.g. repetition_penalty=1.05 would silently decode differently than under
-    an NS run, and the scores would not be comparable."""
+    """Explicit NS sampling defaults must override model-specific server defaults."""
     sampler([{"role": "user", "content": "hi"}], GenConfig())
     extra = sampler._captured["kwargs"]["extra_body"]
     assert extra["min_p"] == 0.0

@@ -1,43 +1,15 @@
-"""Benchmark registration table.
+"""Register benchmarks from a table of loader and generation defaults.
 
-One row per benchmark. Adding a benchmark = appending a row -- no new file,
-no new module. Each entry encodes only the things that genuinely differ:
+Loader entries specify bundled JSONL or prepare.py arguments; multimodal
+entries also identify the media sidecar directory and path column.
 
-- ``loader``: ``"bundled"`` (read vendored test.txt) or ``"prepare"``
-  (run vendored ``prepare.py:save_data``).
-- ``save_args`` / ``save_kwargs``: signature for ``save_data`` when
-  ``loader == "prepare"``.
-- ``argparse_main``: upstream's prepare.py exposes an argparse ``main(args)``
-  rather than ``save_data``; ``save_args[0]`` becomes ``args.split``.
-- ``archive_url`` / ``archive_sha256``: prefetch and digest-check the prepare
-  module's archive here instead of letting the vendored script fetch it.
-- ``media_dir`` / ``media_field``: multimodal ``prepare`` benchmarks only --
-  the sidecar directory ``save_data`` writes beside its jsonl, and the jsonl
-  column holding each row's path into it.
-- ``sample_seed``: turns ``--num-examples N`` into a seeded sample of the whole
-  split, for benchmarks whose jsonl is grouped rather than shuffled.
-- ``thinking``: whether to set ``chat_template_kwargs={"thinking": True}``
-  by default. True for reasoning benchmarks (aime / gpqa); off otherwise.
-- ``default_n_repeats``: per-example repeat count (sgl-eval choice; NS
-  also leaves this to CLI via ``--benchmarks=name:N``).
-- ``default_num_threads``: concurrency ceiling, defaulting to 64. Long-context
-  benchmarks must lower it -- the runner limits requests, not tokens.
-- ``description``: human-readable one-liner.
+Metrics type and prompt name come from vendored dataset metadata. MMMU-Pro
+standard and RULER2 declare them locally: upstream supplies only the vision
+config for the former and generates per-task metadata for the latter.
 
-Sampling params (``temperature`` / ``top_p`` / ``max_tokens``) are **not**
-pinned per benchmark. They come from the global NS-aligned default in
-``GenConfig`` (``temperature=0.0``, ``top_p=0.95``, ``max_tokens=None``).
-Users override per run via CLI flags. ``temperature`` in particular is a
-model property -- DSv3.2/V4 want 1.0, R1 wants 0.6, etc. -- and pinning a
-single value here would encode a model-specific assumption.
-
-``metrics_type`` and the prompt yaml basename are derived at registration
-time from the vendored ``dataset/<name>/__init__.py`` (``METRICS_TYPE`` +
-``GENERATION_ARGS``), so we never hand-mirror upstream's per-benchmark
-choices. Two rows opt out by declaring both explicitly: ``mmmu_pro``
-(upstream ships MMMU-Pro's ``vision`` config only, not the
-``standard (10 options)`` one this row evaluates) and ``ruler2`` (upstream
-ships no dataset metadata -- its subtasks only exist once generated).
+Sampling defaults live in GenConfig and are overridden per model through
+the CLI. Repeat counts, thinking mode, and concurrency are SE defaults;
+concurrency limits requests rather than tokens.
 """
 
 from __future__ import annotations
@@ -132,10 +104,7 @@ _TABLE = [
         "description": "MMLU-Pro (12032 questions, 10-choice, reasoning-heavy).",
     },
     {
-        # SE-own: upstream ships MMMU-Pro's `vision` config only (registered
-        # below as `mmmu_pro_vision`), not `standard (10 options)`. So
-        # metrics_type + prompt + loader_fn bypass the vendored
-        # dataset/__init__.py + prepare path.
+        # Upstream only supplies the vision config; standard needs its own loader.
         "name": "mmmu_pro",
         "metrics_type": "multichoice",
         "prompt": "mmmu-pro-cot",
@@ -145,10 +114,8 @@ _TABLE = [
         "description": "MMMU-Pro (multimodal, 10-choice, vision-dependent).",
     },
     {
-        # MMMU-Pro `vision`: question and options are rendered into one
-        # screenshot, so `problem` carries just the option list. A different
-        # task from `mmmu_pro` above, not a different prompt for the same one
-        # -- scores are not comparable between the two rows.
+        # Vision questions and options are screenshots; scores are not
+        # comparable with the standard config.
         "name": "mmmu_pro_vision",
         "loader": "prepare",
         "save_args": ("test",),
@@ -159,10 +126,7 @@ _TABLE = [
         "description": "MMMU-Pro vision config (whole question rendered as one screenshot).",
     },
     {
-        # Group benchmark: 12 subtasks scored separately, then averaged by
-        # vendored ruler2_score.compute_score. Its dataset is generated per
-        # (tokenizer, seq length), so it needs --ruler2-seq-len N and has
-        # no upstream dataset/__init__.py metadata to derive from.
+        # Upstream generates per-task metadata rather than a group dataset module.
         "name": "ruler2",
         "metrics_type": "ruler2",
         "prompt": "default",
@@ -196,8 +160,6 @@ def _resolve_upstream_metadata(name: str) -> Tuple[str, str]:
 
 
 def _build_default_gen(thinking: bool) -> GenConfig:
-    """All NS-aligned defaults (``temperature=0.0``, ``top_p=0.95``,
-    ``max_tokens=None``); only ``chat_template_kwargs.thinking`` varies."""
     return GenConfig(
         chat_template_kwargs={"thinking": True} if thinking else None,
     )
@@ -224,9 +186,7 @@ def _build_loader(entry: dict):
     raise ValueError(f"unknown loader kind: {kind!r}")
 
 
-# Per-category behavior, in one place. Every factory takes the same arguments so
-# the registration loop below stays free of benchmark names; a new category is a
-# new row here plus its runner module.
+# Category factories share a signature consumed by the registration loop.
 def _math_run(name: str, prompt_basename: str, loader: Callable):
     default_prompt_yaml = resolve_prompt(prompt_basename)
 

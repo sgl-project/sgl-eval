@@ -1,9 +1,7 @@
-"""Render a vendored NeMo-Skills prompt yaml into a final user message.
+"""Render the user template and optional few-shot block from NeMo-Skills YAML.
 
-Mirrors upstream's prompt subsystem for the simple case used by ``generic/math``
-and ``eval/aai/mcq-4choices*`` configs: a top-level ``user`` template with
-optional ``few_shot_examples`` block. We do not replicate hydra's full prompt
-machinery -- benchmarks beyond math/mcq may need richer rendering.
+Only str.format templates are supported; richer upstream prompt features
+require an explicit adapter.
 """
 
 from __future__ import annotations
@@ -40,12 +38,7 @@ def resolve_prompt(spec: str) -> Path:
 
 
 def prompt_media_config(yaml_path: Path) -> dict:
-    """Media placement keys from a VLM prompt yaml (``image_position``).
-
-    ``render_prompt`` consumes only the ``user`` template, so multimodal callers
-    read placement here. Upstream's sibling ``image_field`` stays unexposed --
-    the loader has already resolved it into ``Example.media``.
-    """
+    """The loader resolves image_field into Example.media; only placement remains."""
     cfg = yaml.safe_load(yaml_path.read_text())
     return {"image_position": cfg.get("image_position", "after")}
 
