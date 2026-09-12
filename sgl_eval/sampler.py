@@ -1,10 +1,4 @@
-"""OpenAI-compatible chat completion sampler.
-
-Adapted from sgl-project/sglang/python/sglang/test/simple_eval_common.py with a
-``Sample`` dataclass return value that exposes ``completion_tokens`` and
-``finish_reason`` as first-class fields (cleaner than the upstream
-side-channel list).
-"""
+"""Sample an OpenAI-compatible chat endpoint and retain response metadata."""
 
 from __future__ import annotations
 
@@ -12,6 +6,11 @@ import logging
 import threading
 import time
 from typing import Any, Dict, Optional
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - unavailable on Windows
+    resource = None
 
 import httpx
 import openai
@@ -23,12 +22,38 @@ from sgl_eval.types import GenConfig, MessageList, Sample
 LOG = logging.getLogger(__name__)
 
 
+# Above any plausible --num-threads; httpx's default 100 would silently cap
+# concurrency below what the runner was told to use.
+_MAX_CONNECTIONS = 3600
+_TARGET_NOFILE = 65_535
+
+
+def _raise_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
+    """Leave room for concurrent HTTP sockets and asyncio selectors."""
+    if resource is None:
+        return
+    try:
+        current_soft, current_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        desired_soft = (
+            target if current_hard == resource.RLIM_INFINITY else min(target, current_hard)
+        )
+        if current_soft == resource.RLIM_INFINITY or current_soft >= desired_soft:
+            return
+        resource.setrlimit(resource.RLIMIT_NOFILE, (desired_soft, current_hard))
+    except (OSError, ValueError) as exc:
+        LOG.warning("Could not raise RLIMIT_NOFILE: %s", exc)
+    else:
+        LOG.info("Raised RLIMIT_NOFILE soft limit from %d to %d", current_soft, desired_soft)
+
+
 class _LargeHttpxClient(httpx.Client):
-    """httpx client tuned for long-running reasoning generations."""
+    """Allow the four-hour read timeout used by NeMo-Skills InferenceConfig."""
 
     def __init__(self) -> None:
-        timeout = httpx.Timeout(3600)
-        limits = httpx.Limits(max_keepalive_connections=3600, max_connections=3600)
+        timeout = httpx.Timeout(14400, connect=30)
+        limits = httpx.Limits(
+            max_keepalive_connections=_MAX_CONNECTIONS, max_connections=_MAX_CONNECTIONS
+        )
         super().__init__(timeout=timeout, limits=limits)
 
 
@@ -42,6 +67,7 @@ class ChatCompletionSampler:
         api_key: str = "EMPTY",
         max_retries: int = 6,
     ) -> None:
+        _raise_nofile_soft_limit()
         # Hold the httpx client directly so ``abort()`` can close it without
         # reaching into ``OpenAI``'s private ``_client`` attribute.
         self._http = _LargeHttpxClient()
@@ -52,8 +78,7 @@ class ChatCompletionSampler:
 
     @property
     def aborted(self) -> bool:
-        """True if ``abort()`` was called. CLI uses this to decide exit code
-        without needing to share a ``threading.Event`` directly."""
+        """Whether abort() was called; the CLI uses this to select its exit code."""
         return self._abort_event.is_set()
 
     def abort(self) -> None:
@@ -129,13 +154,17 @@ class ChatCompletionSampler:
         if gen.seed is not None:
             kwargs["seed"] = gen.seed
 
-        extra_body: Dict[str, Any] = {}
+        # Match NS by overriding model-specific generation_config.json defaults.
+        # These extensions require an endpoint that accepts SGLang sampling fields.
+        extra_body: Dict[str, Any] = {
+            "min_p": gen.min_p,
+            "repetition_penalty": gen.repetition_penalty,
+        }
         if gen.chat_template_kwargs:
             extra_body["chat_template_kwargs"] = gen.chat_template_kwargs
         if gen.extra_body:
             extra_body.update(gen.extra_body)
-        if extra_body:
-            kwargs["extra_body"] = extra_body
+        kwargs["extra_body"] = extra_body
         return kwargs
 
     @staticmethod
@@ -143,21 +172,26 @@ class ChatCompletionSampler:
         response: Any, *, start: Optional[float] = None, end: Optional[float] = None
     ) -> Sample:
         choice = response.choices[0]
-        text = choice.message.content or ""
+        message = choice.message
+        text = message.content or ""
+        reasoning_content = getattr(message, "reasoning_content", None)
         usage = getattr(response, "usage", None)
         completion_tokens = getattr(usage, "completion_tokens", None) if usage else None
         prompt_tokens = getattr(usage, "prompt_tokens", None) if usage else None
 
-        # Reasoning models (e.g. OpenAI o-series, sglang thinking-mode)
-        # report split via ``usage.completion_tokens_details.reasoning_tokens``.
+        # OpenAI reports the split under completion_tokens_details. SGLang
+        # historically exposed the same count directly on usage.
         reasoning_tokens = None
         if usage is not None:
             details = getattr(usage, "completion_tokens_details", None)
             if details is not None:
                 reasoning_tokens = getattr(details, "reasoning_tokens", None)
+            if reasoning_tokens is None:
+                reasoning_tokens = getattr(usage, "reasoning_tokens", None)
 
         return Sample(
             text=text,
+            reasoning_content=reasoning_content,
             completion_tokens=completion_tokens,
             prompt_tokens=prompt_tokens,
             reasoning_tokens=reasoning_tokens,

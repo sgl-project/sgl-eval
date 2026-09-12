@@ -1,39 +1,26 @@
-"""Saved-config presets.
+"""Load presets and resolve CLI > preset > benchmark defaults.
 
-A preset bundles ``(benchmark, endpoint, sampling, n_repeats, num_examples,
-expected score)`` into one YAML file under ``~/.sgl_eval/presets/<name>.yaml``
-so a recurring run is one ``--preset <name>`` away. CLI flags always take
-precedence -- a preset is a starting point, not a lock.
-
-The schema is intentionally narrow: anything that doesn't change the
-identity of "the run we're trying to reproduce" stays out (api_key,
-num_threads, out_dir).
-
-This module is the single source of truth for everything preset-related:
-
-  - the dataclass schema + strict YAML loader
-  - the ``--preset`` CLI flag and the ``preset list/show`` subcommand
-  - the ``CLI > preset > spec default`` resolution chain
-  - the ``preset`` provenance block written into ``metrics.json``
-  - the post-run "Expected: X% Got: Y%" comparison print
-
-``cli.py`` only wires it via ``add_preset_run_flag`` /
-``register_preset_subcommand`` / ``resolve_run_inputs`` / ``make_run_meta_block``
-/ ``print_expected_vs_actual``.
+Presets capture benchmark, endpoint, sampling, repeats, sample limits, and
+an optional expected score. API keys and output locations are supplied
+per invocation. This module also provides preset CLI commands and provenance.
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import yaml
 
 from sgl_eval.types import GenConfig
+
+if TYPE_CHECKING:
+    from sgl_eval.model_preset import ModelPreset
 
 PRESET_ROOT = Path.home() / ".sgl_eval" / "presets"
 
@@ -52,13 +39,14 @@ class Sampling:
     # Mapped to ``GenConfig.chat_template_kwargs.thinking`` at apply time;
     # exposed flat here so preset YAML stays human-readable.
     thinking: Optional[bool] = None
+    reasoning_effort: Optional[Union[str, float]] = None
+    # Model templates may read different keys, such as Qwen3 enable_thinking.
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
 
 
 @dataclass
 class Expected:
-    # Headline metric (``pass@1`` for k>1, plain ``score`` for k==1) on
-    # [0, 1]. Informational only -- printed alongside actual at run end,
-    # never gates exit code.
+    # Headline metric on [0, 1]; informational only, never gates exit code.
     score: Optional[float] = None
 
 
@@ -100,9 +88,6 @@ def _load_section(cls: type, raw: Any, source: str) -> Any:
 
 
 def _check_unknown(cls: type, raw: Dict[str, Any], source: str) -> None:
-    """Strict schema -- typos in field names should fail loudly, not be
-    silently ignored. ``Preset.benchmark`` is required so callers must
-    spell it correctly to even get here."""
     known = {f.name for f in dataclasses.fields(cls)}
     unknown = set(raw) - known
     if unknown:
@@ -110,10 +95,7 @@ def _check_unknown(cls: type, raw: Dict[str, Any], source: str) -> None:
 
 
 def resolve_preset_path(spec: str) -> Path:
-    """``spec`` is either a name (resolved under ``PRESET_ROOT``) or an
-    explicit path. We treat anything containing ``/`` or ending in
-    ``.yaml`` / ``.yml`` as a path so users can keep ad-hoc presets next
-    to a project."""
+    """Resolve names under PRESET_ROOT; slashes and YAML suffixes denote paths."""
     if "/" in spec or spec.endswith((".yaml", ".yml")):
         return Path(spec).expanduser()
     return PRESET_ROOT / f"{spec}.yaml"
@@ -134,9 +116,6 @@ def list_presets() -> List[Path]:
 
 
 # ---------- CLI integration ----------
-#
-# Kept inside this module (not in cli.py) so the preset feature is a single
-# self-contained unit: schema + load + override-priority + CLI surface.
 
 
 def add_preset_run_flag(p_run: argparse.ArgumentParser) -> None:
@@ -150,8 +129,6 @@ def add_preset_run_flag(p_run: argparse.ArgumentParser) -> None:
 
 
 def register_preset_subcommand(sub: Any) -> None:
-    """Register the top-level ``preset`` subcommand and its ``list``/``show``
-    children on the main argparse subparsers."""
     p_preset = sub.add_parser("preset", help="manage saved presets")
     preset_sub = p_preset.add_subparsers(dest="preset_cmd", required=True)
     p_list = preset_sub.add_parser("list", help=f"list presets in {PRESET_ROOT}")
@@ -186,45 +163,106 @@ def _cmd_preset_show(args: argparse.Namespace) -> int:
 
 
 def pick(*candidates: Any) -> Any:
-    """First non-``None`` candidate wins. Used for the
-    ``CLI > preset > default`` resolution chain so that ``0`` /
-    ``0.0`` / ``False`` aren't mistaken for "unset" the way ``or`` would."""
+    """Only None is unset; zero and False must survive override resolution."""
     for c in candidates:
         if c is not None:
             return c
     return None
 
 
-def apply_to_gen(
-    default: GenConfig, preset: Optional["Preset"], args: argparse.Namespace
-) -> GenConfig:
-    """Resolve a final ``GenConfig`` honoring CLI > preset > default.
+_EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
-    ``args`` must expose ``temperature``, ``top_p``, ``max_tokens``,
-    ``thinking`` (any of which may be ``None`` for "unset").
+
+def reasoning_effort(raw: str) -> Union[str, float]:
+    """Reject unsupported effort values before they become failed requests."""
+    if raw in _EFFORT_LEVELS:
+        return raw
+    try:
+        value = float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{raw!r} is not one of {', '.join(_EFFORT_LEVELS)} or a float in [0, 0.99]"
+        ) from None
+    if not 0.0 <= value <= 0.99:
+        raise argparse.ArgumentTypeError(f"float effort must be in [0, 0.99], got {value}")
+    return value
+
+
+def parse_chat_template_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
+    """Preserve JSON value types; unquoted non-JSON values remain strings."""
+    parsed: Dict[str, Any] = {}
+    for item in getattr(args, "chat_template_kwarg", None) or []:
+        key, sep, raw = item.partition("=")
+        if not sep or not key.strip():
+            raise SystemExit(f"--chat-template-kwarg expects K=V, got {item!r}")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        parsed[key.strip()] = value
+    return parsed
+
+
+def apply_to_gen(
+    default: GenConfig,
+    preset: Optional["Preset"],
+    args: argparse.Namespace,
+    model_preset: Optional["ModelPreset"] = None,
+) -> GenConfig:
+    """Resolve generation settings with CLI > user preset > model preset > benchmark default precedence.
+
+    Seed has no preset field. Model-specific chat-template keys are retained
+    because they change the prompt.
     """
     p = preset.sampling if preset else None
+    mp = model_preset.sampling if model_preset else None
+    cli = Sampling(thinking=args.thinking, chat_template_kwargs=parse_chat_template_kwargs(args))
     chat_template_kwargs = dict(default.chat_template_kwargs or {})
-    thinking = pick(args.thinking, p.thinking if p else None)
-    if thinking is not None:
-        chat_template_kwargs["thinking"] = thinking
+    # Lowest priority first; each later layer overwrites the previous one.
+    for layer in (mp, p, cli):
+        if layer is None:
+            continue
+        if layer.thinking is not None:
+            chat_template_kwargs["thinking"] = layer.thinking
+        # Within one source the nested key wins over the flat ``thinking`` alias.
+        chat_template_kwargs.update(layer.chat_template_kwargs or {})
     return GenConfig(
-        temperature=pick(args.temperature, p.temperature if p else None, default.temperature),
-        top_p=pick(args.top_p, p.top_p if p else None, default.top_p),
-        max_tokens=pick(args.max_tokens, p.max_tokens if p else None, default.max_tokens),
-        reasoning_effort=default.reasoning_effort,
+        temperature=pick(
+            args.temperature,
+            p.temperature if p else None,
+            mp.temperature if mp else None,
+            default.temperature,
+        ),
+        top_p=pick(
+            args.top_p,
+            p.top_p if p else None,
+            mp.top_p if mp else None,
+            default.top_p,
+        ),
+        max_tokens=pick(
+            args.max_tokens,
+            p.max_tokens if p else None,
+            mp.max_tokens if mp else None,
+            default.max_tokens,
+        ),
+        min_p=default.min_p,
+        repetition_penalty=default.repetition_penalty,
+        reasoning_effort=pick(
+            args.reasoning_effort,
+            p.reasoning_effort if p else None,
+            mp.reasoning_effort if mp else None,
+            default.reasoning_effort,
+        ),
         chat_template_kwargs=chat_template_kwargs or None,
         extra_body=default.extra_body,
-        seed=default.seed,
+        seed=pick(getattr(args, "seed", None), default.seed),
         system_message=default.system_message,
     )
 
 
 @dataclass
 class ResolvedRunInputs:
-    """One-shot view of every value ``cmd_run`` needs after CLI > preset >
-    default resolution. Avoids spreading ``pick(...)`` calls through the
-    CLI body."""
+    """Run settings after CLI, preset, and benchmark-default resolution."""
 
     benchmark: str
     base_url: str
@@ -233,20 +271,32 @@ class ResolvedRunInputs:
     num_examples: Optional[int]
     gen: GenConfig
     preset: Optional["Preset"]
+    model_preset: Optional["ModelPreset"]
 
 
 def resolve_run_inputs(
     args: argparse.Namespace,
     spec_lookup: Callable[[str], Any],
 ) -> ResolvedRunInputs:
-    """Apply CLI > preset > spec default to every run-level setting.
+    """Resolve run settings; missing benchmark or base URL is a CLI error.
 
-    ``spec_lookup`` is ``registry.get`` (or compatible); injected so this
-    module stays free of ``registry`` import. Exits the process via
-    ``sys.exit`` on missing benchmark or base_url -- same UX the CLI had
-    before this refactor.
+    The registry lookup is injected to avoid an import dependency on registry.
     """
+    from sgl_eval.model_preset import UnsupportedModelPresetError, load_model_preset
+
     preset = load_preset(args.preset) if args.preset else None
+    model_preset_id = getattr(args, "load_preset_from_model_id", None)
+    try:
+        model_preset = load_model_preset(model_preset_id) if model_preset_id else None
+    except UnsupportedModelPresetError as exc:
+        supported = "\n".join(f"  - {model_id}" for model_id in exc.supported_model_ids)
+        sys.exit(
+            f"error: no built-in model preset for {exc.model_id!r}.\n"
+            f"Supported model IDs:\n{supported}\n"
+            "Omit --load-preset-from-model-id and configure the benchmark manually with "
+            "--model, --temperature, --top-p, --max-tokens, --thinking/--no-thinking, "
+            "and --reasoning-effort."
+        )
     benchmark = pick(args.name, preset.benchmark if preset else None)
     if not benchmark:
         sys.exit("error: benchmark name required (positional arg or --preset)")
@@ -254,20 +304,29 @@ def resolve_run_inputs(
 
     base_url = pick(args.base_url, preset.endpoint.base_url if preset else None)
     if not base_url:
-        sys.exit("error: --base-url required (or set in preset endpoint.base_url)")
+        detail = "; built-in model presets do not set endpoints" if model_preset is not None else ""
+        sys.exit(
+            "error: --base-url required "
+            f"(pass it explicitly or set preset endpoint.base_url{detail})"
+        )
 
     return ResolvedRunInputs(
         benchmark=spec.name,
         base_url=base_url,
-        model=pick(args.model, preset.endpoint.model if preset else None),
+        model=pick(
+            args.model,
+            preset.endpoint.model if preset else None,
+            model_preset.model if model_preset else None,
+        ),
         n_repeats=pick(
             args.n_repeats,
             preset.n_repeats if preset else None,
             spec.default_n_repeats,
         ),
         num_examples=pick(args.num_examples, preset.num_examples if preset else None),
-        gen=apply_to_gen(spec.default_gen, preset, args),
+        gen=apply_to_gen(spec.default_gen, preset, args, model_preset),
         preset=preset,
+        model_preset=model_preset,
     )
 
 
@@ -277,9 +336,7 @@ def resolve_run_inputs(
 def make_run_meta_block(
     args: argparse.Namespace, preset: Optional["Preset"]
 ) -> Optional[Dict[str, Any]]:
-    """The ``preset`` sub-dict for ``metrics.json``'s ``run_meta``. Returns
-    ``None`` when no preset was used (caller should ``if block: meta["preset"] = block``)
-    so absent presets don't show up as ``"preset": null``."""
+    """Return preset provenance, or None when the run does not use a preset."""
     if preset is None:
         return None
     return {

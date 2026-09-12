@@ -1,10 +1,4 @@
-"""End-to-end pipeline test against a stub sampler.
-
-Doesn't hit any network: monkeypatches ``ChatCompletionSampler`` to return
-a canned ``Sample`` and runs a tiny custom EvalSpec through the runner.
-Validates that the registry / runner / aggregator wiring works without
-relying on a real model or HF dataset download.
-"""
+"""Exercise math and multichoice runners with stub samplers and synthetic datasets."""
 
 from __future__ import annotations
 
@@ -38,6 +32,7 @@ def test_math_pipeline_end_to_end():
     def loader(num_examples):
         return examples[:num_examples] if num_examples else examples
 
+    from sgl_eval.evals._prompts import vendored_prompt
     from sgl_eval.types import GenConfig
 
     result = run_math_benchmark(
@@ -48,6 +43,7 @@ def test_math_pipeline_end_to_end():
         num_examples=None,
         num_threads=2,
         load_examples=loader,
+        prompt_yaml=vendored_prompt("math"),
     )
     assert result.num_examples == 3
     assert result.aggregate["score"] == 1.0

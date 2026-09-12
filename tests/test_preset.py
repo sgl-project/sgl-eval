@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from sgl_eval.model_preset import ModelPreset
 from sgl_eval.preset import (
     Endpoint,
     Expected,
@@ -16,14 +17,14 @@ from sgl_eval.preset import (
     list_presets,
     load_preset,
     pick,
+    reasoning_effort,
     resolve_preset_path,
 )
 from sgl_eval.types import GenConfig
 
 
 def test_full_preset_round_trip(tmp_path: Path) -> None:
-    """All sections parse and absent fields default cleanly. Covers the
-    minimal-preset case via the inverse: untouched sections stay default."""
+    """Preset parsing must retain provided fields and default omitted fields."""
     p = tmp_path / "full.yaml"
     p.write_text("""
 benchmark: aime24
@@ -117,7 +118,7 @@ def test_pick_treats_zero_as_set() -> None:
 
 
 def _args(**overrides) -> argparse.Namespace:
-    base = dict(temperature=None, top_p=None, max_tokens=None, thinking=None)
+    base = dict(temperature=None, top_p=None, max_tokens=None, thinking=None, reasoning_effort=None)
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -143,6 +144,73 @@ def test_apply_to_gen_priority_chain() -> None:
     assert gen.temperature == 0.6
 
 
+def test_apply_to_gen_seed_is_cli_only() -> None:
+    """``seed`` has no preset field (it is a reproducibility knob, not part of
+    the run's identity), and stays unset unless the CLI asks for it."""
+    default = GenConfig()
+    assert apply_to_gen(default, preset=None, args=_args()).seed is None
+    assert apply_to_gen(default, preset=None, args=_args(seed=0)).seed == 0
+
+
+def test_apply_to_gen_keeps_ns_sampling_extras() -> None:
+    """``min_p`` / ``repetition_penalty`` are NS-aligned defaults carried on the
+    spec's GenConfig; resolution must not drop them back to the dataclass."""
+    default = GenConfig(min_p=0.01, repetition_penalty=1.05)
+    gen = apply_to_gen(default, preset=None, args=_args())
+    assert (gen.min_p, gen.repetition_penalty) == (0.01, 1.05)
+
+
+def test_chat_template_kwarg_parses_json_then_falls_back_to_string() -> None:
+    """A model's template may read any key (Qwen3 wants ``enable_thinking``),
+    and the value's type matters -- ``false`` must not arrive as ``"false"``."""
+    gen = apply_to_gen(
+        GenConfig(),
+        preset=None,
+        args=_args(chat_template_kwarg=["enable_thinking=false", "style=terse"]),
+    )
+    assert gen.chat_template_kwargs == {"enable_thinking": False, "style": "terse"}
+
+
+def test_chat_template_kwarg_wins_over_thinking() -> None:
+    gen = apply_to_gen(
+        GenConfig(chat_template_kwargs={"thinking": True}),
+        preset=None,
+        args=_args(chat_template_kwarg=["thinking=false"]),
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
+def test_same_layer_nested_thinking_beats_flat() -> None:
+    """Within one source the nested key wins over the flat ``thinking`` alias."""
+    gen = apply_to_gen(
+        GenConfig(),
+        preset=None,
+        args=_args(thinking=True, chat_template_kwarg=["thinking=false"]),
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
+def test_preset_carries_chat_template_kwargs() -> None:
+    """Presets must retain model-specific chat-template keys to reproduce the prompt."""
+    default = GenConfig()
+    gen = apply_to_gen(
+        default, _preset_with(chat_template_kwargs={"enable_thinking": False}), _args()
+    )
+    assert gen.chat_template_kwargs == {"enable_thinking": False}
+    # CLI still wins over the preset.
+    gen = apply_to_gen(
+        default,
+        _preset_with(chat_template_kwargs={"enable_thinking": False}),
+        _args(chat_template_kwarg=["enable_thinking=true"]),
+    )
+    assert gen.chat_template_kwargs == {"enable_thinking": True}
+
+
+def test_chat_template_kwarg_rejects_missing_equals() -> None:
+    with pytest.raises(SystemExit):
+        apply_to_gen(GenConfig(), preset=None, args=_args(chat_template_kwarg=["thinking"]))
+
+
 def test_apply_to_gen_thinking_priority() -> None:
     """``thinking`` is the only sampling field that lives under
     ``chat_template_kwargs``; verify it follows the same priority chain."""
@@ -153,3 +221,59 @@ def test_apply_to_gen_thinking_priority() -> None:
     # Preset beats default
     gen = apply_to_gen(default, _preset_with(thinking=True), _args())
     assert gen.chat_template_kwargs == {"thinking": True}
+
+
+def test_cli_thinking_beats_user_preset_kwargs() -> None:
+    """A nested preset value must not override an explicit CLI flag."""
+    gen = apply_to_gen(
+        GenConfig(),
+        _preset_with(chat_template_kwargs={"thinking": True}),
+        _args(thinking=False),
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
+def test_user_preset_thinking_beats_model_preset_kwargs() -> None:
+    """A nested model default must not override a saved user preset."""
+    model_preset = ModelPreset(
+        model_id="org/model",
+        model="org/model",
+        sampling=Sampling(chat_template_kwargs={"thinking": True}),
+    )
+    gen = apply_to_gen(
+        GenConfig(),
+        _preset_with(thinking=False),
+        _args(),
+        model_preset,
+    )
+    assert gen.chat_template_kwargs == {"thinking": False}
+
+
+def test_apply_to_gen_reasoning_effort_priority() -> None:
+    """``reasoning_effort`` follows the same CLI > preset > default chain."""
+    default = GenConfig(reasoning_effort="max")
+    # CLI beats preset
+    gen = apply_to_gen(
+        default, _preset_with(reasoning_effort="high"), _args(reasoning_effort="low")
+    )
+    assert gen.reasoning_effort == "low"
+    # Preset beats default
+    gen = apply_to_gen(default, _preset_with(reasoning_effort="high"), _args())
+    assert gen.reasoning_effort == "high"
+    # Default applies when neither CLI nor preset sets it
+    gen = apply_to_gen(default, _preset_with(), _args())
+    assert gen.reasoning_effort == "max"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [("low", "low"), ("0.5", 0.5), ("lo", None), ("1.5", None), ("", None)],
+)
+def test_reasoning_effort_validated_at_parse_time(raw, expected) -> None:
+    """An unaccepted value 400s every request, which the sampler turns into
+    empty samples -- the run would finish at 0% with a successful exit code."""
+    if expected is None:
+        with pytest.raises(argparse.ArgumentTypeError):
+            reasoning_effort(raw)
+    else:
+        assert reasoning_effort(raw) == expected

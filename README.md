@@ -14,22 +14,24 @@ sgl-eval contributes the transport, runner, and benchmark wiring.
 ## Quick start
 
 ```bash
-pip install git+https://github.com/sgl-project/sgl-eval
+pip install sgl-eval
 
 sgl-eval ping --base-url http://localhost:30000/v1
 sgl-eval run gsm8k --base-url http://localhost:30000/v1 --num-examples 50
 ```
 
+Four subcommands: `run`, `list`, `ping`, `preset`. `sgl-eval run --help` is
+the full flag reference -- endpoint, sampling overrides (`--temperature`,
+`--seed`, `--thinking`, ...), and any flags the benchmark itself adds.
+
 ---
 
-## Usage
+## Reading a run
 
-Three subcommands: `list`, `ping`, `run <name>`. See `sgl-eval --help` for
-flags.
-
-Each run prints a summary with the headline metric on top -- single-shot
-accuracy, averaged across the `k` repeats when `k > 1` -- and writes the
-full payload as JSON under `--out-dir`. For example:
+Each run prints the headline metric first -- single-shot accuracy, averaged
+across the `k` repeats when `k > 1` -- and writes the same payload plus
+provenance (model, endpoint, sampling config, vendored NS commit) as
+`metrics.json` under `--out-dir`.
 
 ```
 == aime25 ==
@@ -41,67 +43,41 @@ full payload as JSON under `--out-dir`. For example:
   no_answer          =  20.00%  [warn: consider --max-tokens]
 ```
 
+While the run is going, the progress bar carries a live accuracy. For a
+sanity check that is usually the whole point: watch it, decide, stop.
+
+```
+gsm8k:  34%|###4      | 452/1319 [02:11<04:12, 3.4it/s, acc=81.42%]
+```
+
+Every scored sample is streamed to
+`<out-dir>/sgl_eval_<name>_<stamp>/output-rs*.jsonl` as it lands (disable
+with `--no-dump-predictions`), so the per-sample record survives however the
+run ends. Each record stores the assistant's final response in `generation`
+and separately parsed reasoning in `reasoning_content` when the endpoint
+provides it.
+
 ---
 
-## Partial runs & subsetting
+## Running less than the whole thing
 
-A run doesn't have to cover the full dataset, finish to completion, or even
-use the vendored questions. Four mechanisms:
-
-### Subsetting -- `--num-examples N`
-
-Run only the first `N` examples (smoke tests, quick sanity checks). Omit it
-(or set `num_examples: null` in a preset) to run the full set.
-
-```bash
-sgl-eval run aime25 --base-url http://localhost:30000/v1 --num-examples 5
-```
-
-### Early stop -- `Ctrl-C`
-
-A run can be stopped early without losing scored work:
-
-- **First `Ctrl-C`** -- kills in-flight requests, dumps everything scored
-  so far, writes `metrics.json` flagged `partial: true`, and exits `130`.
-- **Second `Ctrl-C`** -- hard-exit (escape hatch if cleanup hangs).
-
-A partial run reports a **sample-level score range** instead of a single
-number: missing samples are counted once as all-wrong (lower bound) and
-once as all-correct (upper bound), so the true score is guaranteed to lie
-inside. The preset `expected_vs_actual` comparison is skipped (a half-run
-isn't comparable to a baseline).
-
-```
-[partial] 240 / 480 samples completed (240 unfinished, n_repeats=16)
-[partial] examples: 12 full / 6 partial / 12 dropped (30 planned)
-[partial] score range: [39.17%, 89.17%] (missing samples assumed all-wrong / all-correct)
-```
-
-### Custom dataset -- `--from-dataset <path>`
-
-Replace the vendored dataset for one run with your own NS-shape JSONL
-(`{id?, problem, expected_answer}`, one object per line). Only the
-questions change -- scoring still goes through the vendored grader.
-
-```bash
-sgl-eval run aime25 --base-url http://localhost:30000/v1 --from-dataset ./my_problems.jsonl
-```
-
-### Offline recompute -- `refresh`
-
-Every run streams per-sample predictions to
-`<out-dir>/sgl_eval_<name>_<stamp>/output-rs*.jsonl` (disable with
-`--no-dump-predictions`). `refresh` rebuilds `metrics.json` from those
-files -- re-aggregating (pass@k / majority@k / token tally / partial
-counts / score bounds) without re-sampling, and preserving provenance
-(`model` / `base_url` / `ns_commit_sha` / `preset` / ...). It makes no
-requests; a partial run refreshes into the same score range.
-
-```bash
-sgl-eval refresh ~/.sgl_eval/sgl_eval_aime25_<stamp>/
-```
+- **`--num-examples N`** -- only the first `N` examples.
+- **`Ctrl-C`** -- kills in-flight requests, keeps everything already scored,
+  and writes `metrics.json` flagged `partial: true` with how much ran, so a
+  half-run can't later be mistaken for a full one. Exits `130`; a second
+  `Ctrl-C` hard-exits if cleanup hangs. The preset `expected_vs_actual`
+  comparison is skipped -- a half-run isn't comparable to a baseline.
+- **`--from-dataset <path>`** -- swap in your own NS-shape JSONL
+  (`{id?, problem, expected_answer}`) for one run. Only the questions
+  change; scoring still goes through the vendored grader.
 
 ---
+
+## Benchmarks
+
+`sgl-eval list` for the registered set, `sgl-eval list -v` for each one's
+defaults. See [`benchmarks.md`](benchmarks.md) for the ones that need more
+than an endpoint (today: `ruler2`), and for how to match a NeMo-Skills run.
 
 ## Presets
 
@@ -110,14 +86,17 @@ Save a `(benchmark, endpoint, sampling, n_repeats, expected)` bundle to
 <name>`. See [`preset.md`](preset.md) for schema, example, usage, and
 override priority.
 
----
+For repository-maintained model defaults, select an exact supported model ID:
 
-## Supported benchmarks
+```bash
+sgl-eval run BENCHMARK \
+  --base-url BASE_URL \
+  --load-preset-from-model-id MODEL_ID
+```
 
-`sgl-eval list` for the registered set; `sgl-eval list -v` for per-benchmark
-defaults (`n_repeats`, `thinking`, sampling params). All scoring behavior
-(prompt, answer extraction, grading, pass@k / majority@k aggregation) comes
-from the vendored NeMo-Skills slice.
+This sets the served model and its recommended generation parameters, but not
+the deployment-specific `--base-url`. See [`preset.md`](preset.md#built-in-model-presets)
+for the supported model list, resolved values, and override priority.
 
 ---
 
@@ -149,43 +128,21 @@ pytest                             # upstream's own tests run against the
                                    # new slice -- catches behavior drift
 ```
 
----
-
-## Roadmap
-
-- **Replace the accuracy-eval surface in `sgl-project/sglang`.** Today
-  `sglang.test.run_eval` + assorted per-test ad-hoc harnesses do this
-  job. sgl-eval aims to be the single client SGLang's CI calls.
-- **More benchmarks within `math` and `multichoice`** (MATH-500, AIME26,
-  MMLU-Pro, GPQA-extended, ...). Each is one row in `_registry.py:_TABLE`.
-- **New metrics types** (require a new runner per category, but graders
-  are usually already in NeMo-Skills):
-  - `long_context`: LongBench V2, RULER, MRCR
-  - `code`: HumanEval, MBPP, LiveCodeBench (with execution sandbox)
-  - `instruction_following`: IFEval, IFBench
-  - `multimodal` (VLM): MMMU, MathVista (needs an image-aware sampler)
-  - `agentic` / tool use: BFCL, Tau-Bench
-- **More vendor sources** beyond NeMo-Skills, when their slice is the
-  best canonical implementation: `lm-evaluation-harness`, `lmms-eval`,
-  `openai/simple-evals`. Same `_vendored/<source>/` + `SOURCES.yaml`
-  pattern.
-- **LLM-as-judge benchmarks** (Arena-Hard, MTBench). Needs a second
-  judge endpoint and prompt-pair handling -- a real architectural
-  addition, not just a benchmark row.
-- **Regression CI infra**: publish per-run metrics to a `sgl-eval-data`
-  repo, compare against rolling baselines, fail PRs on regression.
+Adding a benchmark inside an existing category (`math`, `multichoice`) is one
+row in `_registry.py:_TABLE`. A new category needs a runner alongside it --
+graders are usually already in NeMo-Skills.
 
 ---
 
-## Out of scope
+## Scope
 
-- **Performance benchmarking.** Latency, throughput, scheduling. Lives
-  in SGLang's `bench_serving.py`. sgl-eval records `latency` /
-  `output_throughput` only as side metrics, never as the headline.
-- **Model training or fine-tuning.**
-- **Multi-server orchestration.** Each invocation targets one
-  OpenAI-compatible endpoint.
-- **Browser / OS-level agent loops** (full BrowseComp-style sandboxing).
+The goal is to be the single accuracy-eval client SGLang's CI calls, in place
+of `sglang.test.run_eval` and the assorted per-test harnesses.
+
+Not in scope: performance benchmarking (latency / throughput / scheduling --
+that is SGLang's `bench_serving.py`; sgl-eval records them only as side
+metrics, never as the headline), training or fine-tuning, multi-server
+orchestration (one endpoint per invocation), and OS-level agent loops.
 
 ---
 

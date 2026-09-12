@@ -1,13 +1,13 @@
-"""Benchmark registry. Each benchmark module registers an ``EvalSpec``
-factory under a stable name; the CLI looks them up here."""
+"""Register EvalSpec instances under stable benchmark names for CLI lookup."""
 
 from __future__ import annotations
 
 import importlib
 import pkgutil
-from dataclasses import dataclass
-from typing import Callable, Dict, List
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
 
+from sgl_eval.predictions import PredSchema
 from sgl_eval.types import GenConfig, RunResult
 
 EvalRunFn = Callable[..., RunResult]
@@ -21,6 +21,12 @@ class EvalSpec:
     default_gen: GenConfig
     default_n_repeats: int
     run: EvalRunFn
+    # Limits requests, not tokens; long-context benchmarks need lower defaults.
+    default_num_threads: int = 64
+    # How a scored sample is written to output-rs*.jsonl.
+    pred_schema: PredSchema = field(default_factory=PredSchema)
+    # Names must use --<benchmark>-* so prepare_run can collect their values.
+    add_arguments: Optional[Callable[[Any], None]] = None
 
 
 _REGISTRY: Dict[str, EvalSpec] = {}

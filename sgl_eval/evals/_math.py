@@ -1,44 +1,44 @@
-"""Glue between sgl-eval's sampler/runner and the vendored NeMo-Skills math
-evaluator.
+"""Adapt the runner to vendored MathEvaluator and MathMetrics.
 
-Mirrors NS pipeline stages:
-  - Stage 2a (prompt render): vendored ``prompts/math.yaml`` + ``str.format``.
-  - Stage 2c (extract + score): vendored ``MathEvaluator.eval_single``.
-  - Stage 4 (aggregate): vendored ``MathMetrics.update`` + ``get_metrics``.
+Prompts come from vendored YAML; evaluator calls bridge async to sync, and
+Sample records are converted to the NeMo-Skills prediction schema.
 """
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import yaml
 
 from sgl_eval._vendored.nemo_skills.evaluator.math import MathEvaluator
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
-from sgl_eval.evals._prompts import render_prompt, vendored_prompt
+from sgl_eval.evals._prompts import render_prompt
 from sgl_eval.predictions import PredictionsWriter, sample_to_pred
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples
 from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import Example, ExampleResult, GenConfig, RunResult, Sample
 
-_MATH_PROMPT_YAML = vendored_prompt("math")
 
-
-def render_math_prompt(problem: str, few_shot_examples: Optional[list] = None) -> str:
-    return render_prompt(_MATH_PROMPT_YAML, problem=problem, few_shot_examples=few_shot_examples)
+def render_math_prompt(
+    prompt_yaml: Path, problem: str, few_shot_examples: Optional[list] = None
+) -> str:
+    return render_prompt(prompt_yaml, problem=problem, few_shot_examples=few_shot_examples)
 
 
 def _eval_single_sync(evaluator: MathEvaluator, data_point: Dict[str, Any]) -> Dict[str, Any]:
-    """Drive ``MathEvaluator.eval_single`` (an ``async def``) synchronously.
-    Body is pure-CPU for math, so per-call event-loop overhead is negligible."""
     return asyncio.run(evaluator.eval_single(data_point))
 
 
-def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig) -> SampleFn:
+def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig, prompt_yaml: Path) -> SampleFn:
+    prompt_config = yaml.safe_load(prompt_yaml.read_text())
+    if prompt_config.get("system") is not None:
+        gen = replace(gen, system_message=prompt_config["system"].format())
+
     def sample_fn(ex: Example, _rep_idx: int) -> Sample:
-        if gen.system_message:
-            prompt = ex.inputs["problem"]
-        else:
-            prompt = render_math_prompt(ex.inputs["problem"])
+        prompt = render_math_prompt(prompt_yaml, ex.inputs["problem"])
         return sampler([{"role": "user", "content": prompt}], gen)
 
     return sample_fn
@@ -72,10 +72,7 @@ def aggregate_with_math_metrics(results: List[ExampleResult], n_repeats: int) ->
 
 
 def _flatten_math_metrics(raw: Dict[str, Any], k: int) -> Dict[str, float]:
-    """Pull headline numbers (and per-run std / SEM when ``k > 1``) out of
-    ``MathMetrics``' nested output. Values normalized to [0, 1]. ``score``
-    aliases the headline (``pass@1[avg-of-k]`` when ``k > 1``, plain
-    ``pass@1`` when ``k == 1``)."""
+    """Normalize percentage metrics to [0, 1]; score aliases the pass@1 headline."""
     flat: Dict[str, float] = {}
     if k == 1:
         per_q = raw.get("pass@1", {})
@@ -104,12 +101,16 @@ def run_math_benchmark(
     num_examples: Optional[int],
     num_threads: int,
     load_examples: Callable[[Optional[int]], List[Example]],
+    prompt_yaml: Path,
     evaluator_config: Optional[Dict[str, Any]] = None,
     predictions_writer: Optional[PredictionsWriter] = None,
 ) -> RunResult:
-    examples = load_examples(num_examples)
+    if evaluator_config is None:
+        prompt_config = yaml.safe_load(prompt_yaml.read_text())
+        evaluator_config = prompt_config.get("evaluator_config", {})
     evaluator = MathEvaluator(config=evaluator_config or {})
-    sample_fn = make_sample_fn(sampler, gen)
+    sample_fn = make_sample_fn(sampler, gen, prompt_yaml)
+    examples = load_examples(num_examples)
     score_one_fn = make_score_one_fn(evaluator)
     aggregator = (
         (lambda results: aggregate_with_math_metrics(results, n_repeats)) if n_repeats > 1 else None

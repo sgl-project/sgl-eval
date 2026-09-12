@@ -1,36 +1,92 @@
-"""Sampler integration tests using a stub OpenAI client.
-
-We don't hit a real server here (no fixtures for that). Instead we verify
-the sampler builds the right request kwargs and unpacks responses into a
-``Sample``. End-to-end against a live SGLang server is tested manually via
-``sgl-eval ping --base-url ...``.
-"""
+"""Check request and response contracts with a stub OpenAI client; no server required."""
 
 from __future__ import annotations
 
+import logging
 import threading
 from types import SimpleNamespace
 
 import pytest
 
+from sgl_eval import sampler as sampler_module
 from sgl_eval.runner import WorkerAborted
 from sgl_eval.sampler import ChatCompletionSampler
 from sgl_eval.types import GenConfig
 
 
-def _stub_response(text: str, completion: int = 7, prompt: int = 11, reasoning: int | None = None):
+def _stub_response(
+    text: str,
+    completion: int = 7,
+    prompt: int = 11,
+    reasoning: int | None = None,
+    reasoning_content: str | None = None,
+    sglang_reasoning: int | None = None,
+):
     usage_kw = {"completion_tokens": completion, "prompt_tokens": prompt}
     if reasoning is not None:
         usage_kw["completion_tokens_details"] = SimpleNamespace(reasoning_tokens=reasoning)
+    if sglang_reasoning is not None:
+        usage_kw["reasoning_tokens"] = sglang_reasoning
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(content=text),
+                message=SimpleNamespace(content=text, reasoning_content=reasoning_content),
                 finish_reason="stop",
             )
         ],
         usage=SimpleNamespace(**usage_kw),
     )
+
+
+@pytest.mark.parametrize(
+    "soft, hard, expected",
+    [
+        pytest.param(1024, 1_048_576, 65_535, id="raise"),
+        pytest.param(1024, 4096, 4096, id="hard-cap"),
+        pytest.param(1024, -1, 65_535, id="unlimited-hard"),
+        pytest.param(131072, 1_048_576, None, id="already-sufficient"),
+    ],
+)
+def test_nofile_soft_limit(monkeypatch, soft, hard, expected):
+    calls = []
+    fake_resource = SimpleNamespace(
+        RLIMIT_NOFILE=7,
+        RLIM_INFINITY=-1,
+        getrlimit=lambda _: (soft, hard),
+        setrlimit=lambda resource_type, limits: calls.append((resource_type, limits)),
+    )
+    monkeypatch.setattr(sampler_module, "resource", fake_resource)
+
+    sampler_module._raise_nofile_soft_limit()
+
+    assert calls == ([] if expected is None else [(7, (expected, hard))])
+
+
+def test_nofile_soft_limit_is_a_noop_without_resource(monkeypatch):
+    monkeypatch.setattr(sampler_module, "resource", None)
+
+    sampler_module._raise_nofile_soft_limit()
+
+
+@pytest.mark.parametrize("operation", ["getrlimit", "setrlimit"])
+def test_nofile_soft_limit_logs_and_continues_on_resource_error(monkeypatch, caplog, operation):
+    def raise_oserror(*_args):
+        raise OSError("not permitted")
+
+    fake_resource = SimpleNamespace(
+        RLIMIT_NOFILE=7,
+        RLIM_INFINITY=-1,
+        getrlimit=lambda _: (1024, 1_048_576),
+        setrlimit=lambda *_: None,
+    )
+    setattr(fake_resource, operation, raise_oserror)
+    monkeypatch.setattr(sampler_module, "resource", fake_resource)
+
+    with caplog.at_level(logging.WARNING):
+        sampler_module._raise_nofile_soft_limit()
+
+    assert "RLIMIT_NOFILE" in caplog.text
+    assert "not permitted" in caplog.text
 
 
 @pytest.fixture
@@ -67,6 +123,20 @@ def test_chat_template_kwargs_become_extra_body(sampler):
     assert kw["extra_body"]["chat_template_kwargs"] == {"thinking": True}
 
 
+def test_min_p_and_repetition_penalty_always_sent(sampler):
+    """Explicit NS sampling defaults must override model-specific server defaults."""
+    sampler([{"role": "user", "content": "hi"}], GenConfig())
+    extra = sampler._captured["kwargs"]["extra_body"]
+    assert extra["min_p"] == 0.0
+    assert extra["repetition_penalty"] == 1.0
+
+
+def test_explicit_extra_body_wins_over_the_ns_defaults(sampler):
+    gen = GenConfig(extra_body={"repetition_penalty": 1.05})
+    sampler([{"role": "user", "content": "hi"}], gen)
+    assert sampler._captured["kwargs"]["extra_body"]["repetition_penalty"] == 1.05
+
+
 def test_system_message_prepended(sampler):
     gen = GenConfig(system_message="you are a helper")
     sampler([{"role": "user", "content": "hi"}], gen)
@@ -84,6 +154,29 @@ def test_reasoning_tokens_extracted(sampler):
     out = sampler([{"role": "user", "content": "hi"}])
     assert out.completion_tokens == 20
     assert out.reasoning_tokens == 15
+
+
+def test_sglang_reasoning_fields_extracted(sampler):
+    """SGLang exposes reasoning text on the message and, in older releases,
+    its token count directly on usage."""
+    sampler.client.chat.completions.create = lambda **_: _stub_response(
+        "answer",
+        completion=20,
+        reasoning_content="thinking",
+        sglang_reasoning=15,
+    )
+    out = sampler([{"role": "user", "content": "hi"}])
+    assert out.text == "answer"
+    assert out.reasoning_content == "thinking"
+    assert out.reasoning_tokens == 15
+
+
+def test_standard_reasoning_token_count_takes_precedence(sampler):
+    sampler.client.chat.completions.create = lambda **_: _stub_response(
+        "answer", reasoning=12, sglang_reasoning=10
+    )
+    out = sampler([{"role": "user", "content": "hi"}])
+    assert out.reasoning_tokens == 12
 
 
 def test_abort_before_call_raises(sampler):

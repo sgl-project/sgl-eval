@@ -11,18 +11,19 @@ MessageList = List[Message]
 
 @dataclass
 class GenConfig:
-    """Per-call generation parameters. Decoupled from the sampler so one
-    sampler instance can serve multiple benchmarks with different configs.
+    """Per-call generation parameters with NeMo-Skills InferenceConfig defaults.
 
-    Defaults mirror NeMo-Skills' ``InferenceConfig`` (``temperature=0.0``,
-    ``top_p=0.95``, ``max_tokens=None`` => server picks a cap). Per-benchmark
-    overrides live in ``sgl_eval/evals/_registry.py``; CLI overrides live in
-    ``sgl_eval/cli.py``.
+    Benchmark defaults live in evals/_registry.py; preset.py resolves CLI
+    overrides. max_tokens=None leaves the output limit to the server.
     """
 
     temperature: float = 0.0
     top_p: float = 0.95
     max_tokens: Optional[int] = None
+    # Sent on every request, like NS does. Left unsent they would resolve
+    # from the served model's generation_config.json instead.
+    min_p: float = 0.0
+    repetition_penalty: float = 1.0
     reasoning_effort: Optional[str] = None
     chat_template_kwargs: Optional[Dict[str, Any]] = None
     extra_body: Optional[Dict[str, Any]] = None
@@ -32,10 +33,7 @@ class GenConfig:
 
 @dataclass
 class Sample:
-    """One model response. Carries enough metadata for throughput,
-    truncation, reasoning-token, and gen-time analysis without re-fetching
-    the raw OpenAI response. Field names mirror upstream NeMo-Skills'
-    prediction dict so the data feeds into vendored metrics directly."""
+    """One response with timing and token counts for the NeMo-Skills prediction adapter."""
 
     text: str
     completion_tokens: Optional[int] = None
@@ -45,6 +43,19 @@ class Sample:
     generation_start_time: Optional[float] = None
     generation_end_time: Optional[float] = None
     raw: Any = None
+    reasoning_content: Optional[str] = None
+
+
+@dataclass
+class MediaItem:
+    """One input media attachment (image/video). ``kind`` selects the message
+    block; ``data`` (raw bytes) is used for images via base64 data URL, ``url``
+    for video (too large to inline) or pre-hosted images."""
+
+    kind: str  # "image" | "video"
+    data: bytes = b""
+    url: str = ""
+    mime: str = ""  # "image/png" | "video/mp4" | ...
 
 
 @dataclass
@@ -55,6 +66,7 @@ class Example:
     inputs: Dict[str, Any]
     target: Any
     meta: Dict[str, Any] = field(default_factory=dict)
+    media: List[MediaItem] = field(default_factory=list)
 
 
 @dataclass
@@ -69,18 +81,11 @@ class ExampleResult:
 
 @dataclass
 class RunResult:
-    """Top-level eval result. Aggregator metrics live in ``aggregate``.
+    """Evaluation results and aggregate metrics.
 
-    ``partial`` is True when at least one ``(example, repeat)`` sample
-    didn't make it into ``per_example`` (e.g. the runner was aborted
-    mid-flight). Defined at the sample level so an example whose 1/3 reps
-    completed -- which the aggregator pads up to 3 by repeating the last
-    sample -- still surfaces as partial.
-
-    ``planned_examples`` is what the runner was asked to score; multiply
-    by ``n_repeats`` for planned samples. ``num_examples`` is what
-    survived (>=1 rep completed); ``sum(len(r.samples) for r in per_example)``
-    gives completed samples.
+    partial tracks missing samples, including incomplete repeats of a retained
+    example. planned_examples counts requested examples; num_examples counts
+    those with at least one completed sample.
     """
 
     name: str

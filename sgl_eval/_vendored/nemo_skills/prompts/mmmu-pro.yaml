@@ -1,0 +1,16 @@
+# Vendored from NVIDIA/NeMo-Skills@645cf567ff08c0ae9cc3fc8e1edbb975b3067816
+# Source: nemo_skills/prompt/config/vlm/mmmu-pro.yaml
+# DO NOT EDIT directly. To upgrade, edit SOURCES.yaml and rerun
+# `python scripts/sync_vendored.py`.
+
+# Prompt config for MMMU-Pro VLM benchmark with 10 answer choices.
+# Based on AAI methodology: https://artificialanalysis.ai/methodology/intelligence-benchmarking
+# Image is shown before the question text.
+
+image_field: image_path
+image_position: before
+
+user: |-
+  Answer the following multiple choice question. The last line of your response should be in the following format: 'Answer: A/B/C/D/E/F/G/H/I/J' (e.g. 'Answer: A').
+
+  {problem}

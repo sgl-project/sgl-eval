@@ -1,5 +1,4 @@
-"""Stage 1: resolve args, build sampler, mkdir, install sigint. Produces
-the ``RunContext`` consumed by Stage 2 / Stage 3."""
+"""Prepare run inputs and resources, including prediction files and SIGINT handling."""
 
 from __future__ import annotations
 
@@ -10,9 +9,10 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sgl_eval.evals._loader import load_from_path
+from sgl_eval.evals._prompts import resolve_prompt
 from sgl_eval.predictions import PredictionsWriter
 from sgl_eval.preset import ResolvedRunInputs, resolve_run_inputs
 from sgl_eval.registry import EvalSpec, get
@@ -33,6 +33,9 @@ class RunContext:
     num_threads: int
     args: argparse.Namespace
     load_examples: Optional[Callable[[Optional[int]], List[Example]]]
+    bench_args: Dict[str, Any]
+    # None means "the benchmark's registered prompt"; set only by --prompt.
+    prompt_yaml: Optional[Path]
     _prev_sigint_handler: Any
 
 
@@ -50,9 +53,16 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Run directory: {run_dir}")
 
-    writer = PredictionsWriter(run_dir, inputs.n_repeats) if args.dump_predictions else None
+    writer = (
+        PredictionsWriter(run_dir, inputs.n_repeats, spec.pred_schema)
+        if args.dump_predictions
+        else None
+    )
     prev_sigint = signal.signal(signal.SIGINT, _make_sigint_handler(sampler))
     load_examples = load_from_path(args.from_dataset) if args.from_dataset else None
+
+    num_threads = args.num_threads if args.num_threads is not None else spec.default_num_threads
+    prompt_yaml = _resolve_prompt_override(getattr(args, "prompt", None))
 
     return RunContext(
         inputs=inputs,
@@ -61,11 +71,33 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
         run_dir=run_dir,
         writer=writer,
         stamp=stamp,
-        num_threads=args.num_threads,
+        num_threads=num_threads,
         args=args,
         load_examples=load_examples,
+        bench_args=_collect_bench_args(args, spec.name),
+        prompt_yaml=prompt_yaml,
         _prev_sigint_handler=prev_sigint,
     )
+
+
+def _resolve_prompt_override(spec: Optional[str]) -> Optional[Path]:
+    """Resolve up front so a typo fails before the server is loaded, not at first render."""
+    if spec is None:
+        return None
+    path = resolve_prompt(spec)
+    if not path.exists():
+        raise FileNotFoundError(f"--prompt {spec!r}: no prompt yaml at {path}")
+    return path
+
+
+def _collect_bench_args(args: argparse.Namespace, name: str) -> Dict[str, Any]:
+    """Generated-dataset options also identify the run in metrics.json."""
+    prefix = f"{name}_"
+    return {
+        key[len(prefix) :]: value
+        for key, value in vars(args).items()
+        if key.startswith(prefix) and value is not None
+    }
 
 
 def teardown(ctx: RunContext) -> None:

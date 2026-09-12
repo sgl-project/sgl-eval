@@ -1,13 +1,7 @@
-"""Glue between sgl-eval's sampler/runner and the vendored NeMo-Skills
-multichoice evaluator (``eval_mcq``) + the same ``MathMetrics`` aggregator
-(it consumes any binary ``symbolic_correct`` field).
+"""Adapt the runner to vendored eval_mcq and MathMetrics.
 
-Pipeline mirror:
-  - Stage 2a (prompt render): vendored ``mcq-4choices.yaml`` /
-    ``mcq-4choices-boxed.yaml``.
-  - Stage 2c (extract + score): vendored ``eval_mcq`` -- batch over the
-    n_repeats samples for one example via a temp jsonl.
-  - Stage 4 (aggregate): vendored ``MathMetrics`` (binary symbolic_correct).
+The file-based evaluator receives one prediction per temporary JSONL.
+MathMetrics aggregates its binary symbolic_correct field across repeats.
 """
 
 from __future__ import annotations
@@ -24,7 +18,8 @@ _mcq_mod.tqdm = lambda iterable, **_kwargs: iterable
 
 from sgl_eval._vendored.nemo_skills.evaluator.mcq import eval_mcq  # noqa: E402
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics  # noqa: E402
-from sgl_eval.evals._prompts import render_prompt  # noqa: E402
+from sgl_eval.evals._prompts import prompt_media_config, render_prompt  # noqa: E402
+from sgl_eval.evals._vision import build_user_content  # noqa: E402
 from sgl_eval.predictions import PredictionsWriter, sample_to_pred  # noqa: E402
 from sgl_eval.runner import SampleFn, ScoreOneFn, run_examples  # noqa: E402
 from sgl_eval.sampler import ChatCompletionSampler  # noqa: E402
@@ -32,9 +27,7 @@ from sgl_eval.types import Example, ExampleResult, GenConfig, RunResult, Sample 
 
 
 def _score_via_eval_mcq(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Run vendored ``eval_mcq`` over a batch of rows. Each row needs
-    ``generation`` + ``expected_answer``; on return rows have
-    ``predicted_answer`` and ``symbolic_correct`` filled in."""
+    """Bridge the file-based evaluator to in-memory prediction dictionaries."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
         for row in rows:
             f.write(json.dumps(row) + "\n")
@@ -48,18 +41,19 @@ def _score_via_eval_mcq(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def make_sample_fn(sampler: ChatCompletionSampler, gen: GenConfig, prompt_yaml: Path) -> SampleFn:
+    image_position = prompt_media_config(prompt_yaml)["image_position"]
+
     def sample_fn(ex: Example, _rep_idx: int) -> Sample:
         prompt_text = render_prompt(prompt_yaml, problem=ex.inputs["problem"])
-        return sampler([{"role": "user", "content": prompt_text}], gen)
+        content = build_user_content(prompt_text, ex.media, image_position=image_position)
+        return sampler([{"role": "user", "content": content}], gen)
 
     return sample_fn
 
 
 def make_score_one_fn() -> ScoreOneFn:
     def score_one(ex: Example, sample: Sample) -> Tuple[float, Optional[str]]:
-        # ``eval_mcq`` is file-batch only, so we feed it a 1-row jsonl per
-        # sample. ~5ms/call: cheap relative to LLM round-trip, and lets us
-        # surface inflight accuracy on the progress bar.
+        # eval_mcq accepts files; one-row batches allow per-sample progress.
         rows = [{"generation": sample.text, **sample_to_pred(sample, ex)}]
         scored = _score_via_eval_mcq(rows)
         r = scored[0]
@@ -87,8 +81,6 @@ def aggregate_with_math_metrics(results: List[ExampleResult], n_repeats: int) ->
 
 
 def _flatten(raw: Dict[str, Any], k: int) -> Dict[str, float]:
-    """Same shape as ``_math._flatten_math_metrics`` -- both feed the same
-    ``format_summary`` renderer downstream."""
     flat: Dict[str, float] = {}
     if k == 1:
         per_q = raw.get("pass@1", {})
