@@ -55,8 +55,9 @@ sgl-eval run aime25 --base-url http://localhost:30000/v1 \
   --prompt matharena-aime
 ```
 
-An overridden prompt is recorded under `prompt` in `metrics.json`; a score
-carrying that key is not comparable with one that does not. `ruler2` rejects
+An overridden prompt, including its YAML contents, is recorded under `prompt`
+in `metrics.json`; a score carrying that key is not comparable with one that
+does not. `ruler2` rejects
 the flag -- its prompt is a pure passthrough and the context is assembled by
 the prepare scripts.
 
@@ -68,6 +69,43 @@ its spec as `f"{bench}:{repeats}"` gets 0.7 even when it means "run once",
 and sgl-eval's greedy default will not reproduce it. Pass
 `--temperature 0.7 --seed 0` to match such a run, or re-baseline against
 greedy.
+
+### Custom math answer formats
+
+For math benchmarks, a custom prompt YAML can also set `system` and
+`evaluator_config`. The system template overrides `GenConfig.system_message`
+for that run; omitting it preserves the caller's system message, and an empty
+string clears it. The `user` template is always rendered. Use doubled braces
+for literal braces in either template.
+
+For example, save the following as `aime-exact-answer.yaml` to request the
+Explanation / Exact Answer / Confidence format discussed in
+[#22](https://github.com/sgl-project/sgl-eval/pull/22):
+
+```yaml
+system: |-
+  Your response should be in the following format:
+  Explanation: {{your explanation for your final answer}}
+  Exact Answer: {{your succinct, final answer}}
+  Confidence: {{your confidence score between 0% and 100% for your answer}}
+user: "{problem}"
+evaluator_config:
+  relaxed_extraction: true
+  extract_regex: '(?m)^[ \t]*(?:\*\*)?Exact Answer:(?:\*\*)?[ \t]*(?:\*\*)?(\S(?:[^\r\n]*?\S)?)(?:\*\*)?[ \t]*\r?$'
+```
+
+```bash
+sgl-eval run aime26 --base-url http://localhost:30000/v1 \
+  --prompt ./aime-exact-answer.yaml \
+  --max-tokens 163840 --temperature 1.0 --top-p 0.95 --num-threads 64
+```
+
+`evaluator_config` is passed to the vendored NeMo-Skills `MathEvaluator`.
+The example extracts a nonempty answer from its own line, accepts optional
+bold Markdown, preserves multiplication such as `6*7`, and falls back to
+`\boxed{...}` when no answer line matches. These fields are supported only
+for math benchmarks. The default AIME prompt and boxed extraction stay
+unchanged; this custom protocol needs its own baseline.
 
 ---
 

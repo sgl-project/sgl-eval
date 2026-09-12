@@ -7,8 +7,11 @@ Sample records are converted to the NeMo-Skills prediction schema.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import yaml
 
 from sgl_eval._vendored.nemo_skills.evaluator.math import MathEvaluator
 from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
@@ -98,9 +101,15 @@ def run_math_benchmark(
     evaluator_config: Optional[Dict[str, Any]] = None,
     predictions_writer: Optional[PredictionsWriter] = None,
 ) -> RunResult:
-    examples = load_examples(num_examples)
+    prompt_config = yaml.safe_load(prompt_yaml.read_text())
+    if prompt_config.get("system") is not None:
+        gen = replace(gen, system_message=prompt_config["system"].format())
+    if evaluator_config is None:
+        evaluator_config = prompt_config.get("evaluator_config", {})
+
     evaluator = MathEvaluator(config=evaluator_config or {})
     sample_fn = make_sample_fn(sampler, gen, prompt_yaml)
+    examples = load_examples(num_examples)
     score_one_fn = make_score_one_fn(evaluator)
     aggregator = (
         (lambda results: aggregate_with_math_metrics(results, n_repeats)) if n_repeats > 1 else None

@@ -70,7 +70,11 @@ def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
     # A different prompt is a different question: a score carrying this key is
     # not comparable with one that does not.
     if ctx.prompt_yaml is not None:
-        meta["prompt"] = {"spec": ctx.args.prompt, "path": str(ctx.prompt_yaml)}
+        meta["prompt"] = {
+            "spec": ctx.args.prompt,
+            "path": str(ctx.prompt_yaml),
+            "yaml": ctx.prompt_yaml.read_text(),
+        }
     model_preset_block = make_model_preset_meta_block(ctx.inputs.model_preset)
     if model_preset_block:
         meta["model_preset"] = model_preset_block
