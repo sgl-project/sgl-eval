@@ -1,5 +1,4 @@
-"""Stage 1: resolve args, build sampler, mkdir, install sigint. Produces
-the ``RunContext`` consumed by Stage 2 / Stage 3."""
+"""Prepare run inputs and resources, including prediction files and SIGINT handling."""
 
 from __future__ import annotations
 
@@ -92,9 +91,7 @@ def _resolve_prompt_override(spec: Optional[str]) -> Optional[Path]:
 
 
 def _collect_bench_args(args: argparse.Namespace, name: str) -> Dict[str, Any]:
-    """Gather the running benchmark's own ``--<name>-*`` options, prefix
-    stripped. Feeds the run fn and ``metrics.json`` provenance -- a generated
-    dataset is identified by nothing else."""
+    """Generated-dataset options also identify the run in metrics.json."""
     prefix = f"{name}_"
     return {
         key[len(prefix) :]: value

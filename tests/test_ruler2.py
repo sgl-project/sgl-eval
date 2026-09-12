@@ -1,10 +1,4 @@
-"""RULER2 glue tests. No generation and no server: everything here is either
-a vendored-consistency assertion or a scoring path driven by hand-built rows.
-
-The dataset itself cannot be built in CI (it needs a tokenizer, HF downloads,
-and minutes per subtask), so the invariants that would otherwise only surface
-at runtime are asserted statically instead.
-"""
+"""Check RULER2 glue against vendored graders and metadata without generating a dataset."""
 
 from __future__ import annotations
 
@@ -82,11 +76,7 @@ def test_grader_read_back_from_vendored_prepare(tmp_path, monkeypatch, task, eva
 
 @pytest.mark.parametrize("task", ["mk_niah_medium", "mk_niah_hard"])
 def test_ruler2_metrics_matches_upstreams_multichoice_number(tmp_path, monkeypatch, task):
-    """Upstream marks these two ``METRICS_TYPE=multichoice`` (i.e. MathMetrics)
-    while we run all 12 subtasks through ``Ruler2Metrics``. The two publish the
-    same value under different keys -- ``accuracy`` vs ``symbolic_correct`` --
-    which is why vendored ``compute_score`` accepts either. Pin both halves so
-    a future NS bump cannot turn this into a silent scoring difference."""
+    """Ruler2Metrics and MathMetrics must agree on the two upstream multichoice tasks."""
     import sgl_eval.evals._ruler2 as mod
     from sgl_eval._vendored.nemo_skills.dataset.ruler2 import prepare
     from sgl_eval._vendored.nemo_skills.math_metrics import MathMetrics
@@ -135,10 +125,7 @@ def test_pred_schema_omits_the_prompt():
 
 
 def test_stringified_target_would_destroy_the_signal():
-    """Quantifies why PRED_SCHEMA exists. With the default (stringifying)
-    schema, ``eval_ruler2`` iterates the repr's characters, so a wrong answer
-    and the right one land on the SAME score -- the grader stops discriminating
-    while still reporting a plausible-looking number."""
+    """List-valued targets must distinguish correct and incorrect generations."""
     from sgl_eval._vendored.nemo_skills.evaluator.ruler import eval_ruler2
     from sgl_eval.evals._ruler2 import _score_via
     from sgl_eval.predictions import PredSchema, sample_to_pred
@@ -250,10 +237,7 @@ def test_headline_subset_is_flagged():
 
 @pytest.mark.parametrize("completed", [11, 5, 1, 0])
 def test_headline_survives_an_aborted_full_group(completed):
-    """Ctrl-C during a full-group run leaves fewer subtasks than were asked
-    for. Gating on the requested set sent this into vendored ``compute_score``,
-    which raised (KeyError on the first missing task, IndexError when nothing
-    finished) and took the whole partial-metrics dump with it."""
+    """Aborting before all tasks complete must still produce a partial metrics summary."""
     per_task = {t: _task_metrics(_results([1.0]), 1, "ruler2") for t in ALL_TASKS[:completed]}
     flat = _headline(per_task, 1, namespace="setup")
     assert flat["score"] == pytest.approx(1.0 if completed else 0.0)
@@ -271,9 +255,7 @@ def test_task_metrics_accepts_float_scores():
 
 
 def test_seq_len_reaches_prepare_unchanged(tmp_path, monkeypatch):
-    """NS口径: ``seq_len`` is the dataset definition and must be handed to the
-    vendored generator verbatim. sgl-eval adds no knob that shrinks it -- doing
-    so would make our numbers incomparable with any published RULER2 result."""
+    """The requested context length must reach the vendored generator unchanged."""
     import sgl_eval.evals._ruler2 as mod
 
     monkeypatch.setattr(mod, "_CACHE_ROOT", tmp_path)
@@ -328,8 +310,7 @@ def _parse_run(*extra: str):
     ],
 )
 def test_argparse_rejects_bad_ruler2_options(flags):
-    """These used to be hand-rolled checks inside ``from_bench_args``. argparse
-    owns them now -- including the two flags that must stay gone."""
+    """Invalid values and unsupported flags must fail during CLI parsing."""
     with pytest.raises(SystemExit):
         _parse_run(*flags)
 

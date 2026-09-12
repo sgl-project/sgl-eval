@@ -1,5 +1,4 @@
-"""Benchmark registry. Each benchmark module registers an ``EvalSpec``
-factory under a stable name; the CLI looks them up here."""
+"""Register EvalSpec instances under stable benchmark names for CLI lookup."""
 
 from __future__ import annotations
 
@@ -22,15 +21,11 @@ class EvalSpec:
     default_gen: GenConfig
     default_n_repeats: int
     run: EvalRunFn
-    # Concurrency the benchmark is safe at by default. The runner limits by
-    # request count, not token budget, so a long-context benchmark has to ask
-    # for a lower ceiling than the 64 that suits short prompts.
+    # Limits requests, not tokens; long-context benchmarks need lower defaults.
     default_num_threads: int = 64
     # How a scored sample is written to output-rs*.jsonl.
     pred_schema: PredSchema = field(default_factory=PredSchema)
-    # Lets a benchmark add its own options to ``sgl-eval run``, so argparse owns
-    # their types, choices and --help instead of a stringly-typed side channel.
-    # Names must be prefixed ``--<benchmark>-*``; ``prepare_run`` collects them.
+    # Names must use --<benchmark>-* so prepare_run can collect their values.
     add_arguments: Optional[Callable[[Any], None]] = None
 
 

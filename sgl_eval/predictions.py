@@ -1,8 +1,4 @@
-"""``output-rs{rep}.jsonl`` is the canonical per-sample record, streamed
-during a live run: the faithful log of what the model actually said, kept
-for offline analysis (flaky / timeout / eyeballing). ``sample_to_pred``
-mints the NS wire shape consumed by ``MathEvaluator.eval_single`` at
-sample time and ``MathMetrics.update`` at aggregate time."""
+"""Adapt samples to the NeMo-Skills prediction schema and stream them to JSONL."""
 
 from __future__ import annotations
 
@@ -17,12 +13,11 @@ from sgl_eval.types import Example, Sample
 
 @dataclass(frozen=True)
 class PredSchema:
-    """How a scored sample becomes an NS prediction dict.
+    """Adapt target and score types to the vendored evaluator contract.
 
-    Defaults are the math/mcq shape. RULER2 flips every field: its grader
-    iterates ``expected_answer`` as a list (stringified, it walks the repr
-    character by character and scores almost everything correct), its score is a
-    float, and echoing the ~500KB prompt would dwarf the run.
+    RULER2 needs list-valued targets and float scores; stringifying a target
+    would make its grader compare individual characters. Its long prompts
+    can be omitted from prediction dumps.
     """
 
     stringify_target: bool = True
@@ -61,9 +56,10 @@ def sample_to_pred(
 
 
 class PredictionsWriter:
-    """Streaming JSONL writer. One file per repeat; flushes every line so
-    a Ctrl-C / crash leaves all already-scored samples on disk. Thread-safe
-    via a single lock (negligible contention vs LLM RTT)."""
+    """Write one JSONL file per repeat, flushing each sample for crash recovery.
+
+    Calls are serialized so concurrent users cannot interleave records.
+    """
 
     def __init__(self, out_dir: Path, n_repeats: int, schema: PredSchema = _DEFAULT_SCHEMA) -> None:
         out_dir.mkdir(parents=True, exist_ok=True)

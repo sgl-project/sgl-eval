@@ -1,9 +1,4 @@
-"""Tests for ``mmmu_pro_vision`` -- the strictly-vendored MMMU-Pro row.
-
-Covers the three things that make it different from every other ``prepare``
-benchmark: metadata is derived from upstream rather than declared, the media
-sidecar has to leave ``_vendored``, and the prompt places its image first.
-"""
+"""Check vision metadata, media-sidecar caching, and image-first prompt placement."""
 
 from __future__ import annotations
 
@@ -24,9 +19,7 @@ def test_registered_as_multichoice():
 
 
 def test_metadata_is_derived_not_declared():
-    """The row must NOT hand-mirror upstream's choices: ``metrics_type`` and the
-    prompt basename come from the vendored ``__init__.py``. Declaring either in
-    ``_TABLE`` would silently decouple us from upstream."""
+    """Vendored metadata must determine the metrics type and prompt name."""
     from sgl_eval.evals._registry import _TABLE, _resolve_upstream_metadata
 
     [entry] = [e for e in _TABLE if e["name"] == "mmmu_pro_vision"]
@@ -50,9 +43,8 @@ def test_vendored_prompt_places_image_first():
     assert prompt_media_config(path)["image_position"] == "before"
 
 
-def test_vendored_dataset_module_is_upstream_verbatim():
-    """The dst dir is renamed (hyphen -> underscore) but the file must still be
-    upstream's, banner included."""
+def test_vendored_dataset_metadata_and_provenance():
+    """The renamed package must retain its upstream source path and vision metadata."""
     from sgl_eval import VENDORED_NS_ROOT
 
     text = (VENDORED_NS_ROOT / "dataset" / "mmmu_pro_vision" / "__init__.py").read_text()
@@ -62,9 +54,6 @@ def test_vendored_dataset_module_is_upstream_verbatim():
 
 
 def _fake_prepare_module(tmp_path, rows, image_names):
-    """A stand-in for the vendored ``prepare`` module: ``save_data`` writes a
-    jsonl plus an ``images/`` sidecar next to ``__file__``, exactly as
-    upstream's does."""
     vendored_dir = tmp_path / "vendored_pkg"
     vendored_dir.mkdir()
     mod = types.ModuleType("fake_prepare")

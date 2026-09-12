@@ -1,9 +1,4 @@
-"""Metric output. Writes ``metrics.json`` per run plus a stdout summary.
-
-A run lives in its own directory (``<out>/sgl_eval_<name>_<stamp>/``) which
-also holds the streaming ``output-rs{i}.jsonl`` prediction files written by
-``PredictionsWriter``.
-"""
+"""Write metrics.json and format the stdout summary for a run directory."""
 
 from __future__ import annotations
 
@@ -21,12 +16,9 @@ def dump_run(
     *,
     run_meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """Write ``metrics.json`` into ``out_dir`` (the per-run folder).
+    """Write metrics.json with optional provenance fields.
 
-    ``run_meta`` is merged into the top-level payload alongside the
-    aggregate -- intended for endpoint / model / sampling config /
-    sgl-eval + NS provenance, anything that helps a future reader
-    reproduce the run.
+    run_meta may add fields but must not replace core result fields.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -53,9 +45,7 @@ def dump_run(
 
 
 def format_summary(result: RunResult) -> str:
-    """Compact stdout summary. Headline metric (``pass@1[avg-of-k]`` when
-    ``k > 1``, plain ``score`` when ``k == 1``) is prefixed with ``*``;
-    auxiliary metrics indented two spaces."""
+    """Mark the headline with *: pass@1[avg-of-k] for repeats, score otherwise."""
     k = result.n_repeats
     agg = result.aggregate
 

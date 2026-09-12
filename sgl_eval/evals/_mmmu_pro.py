@@ -1,13 +1,7 @@
-"""MMMU-Pro loader (sgl-eval-own; NeMo-Skills upstream has no MMMU-Pro).
+"""Load MMMU-Pro standard (10 options) into the NeMo-Skills MCQ schema.
 
-Fetches ``MMMU/MMMU_Pro`` from HuggingFace and attaches each question's image
-as a ``MediaItem`` so the multichoice runner builds an OpenAI vision message.
-Options are variable-length (most questions have 10; some fewer) and
-``get_mcq_fields`` (vendored) handles any count. ``answer`` is a letter A-J.
-
-The vendoring contract is preserved: nothing here decides a score -- the
-multichoice grader (``eval_mcq``) and aggregator (``MathMetrics``) stay
-vendored. This module is transport (dataset fetch + NS-shape row build).
+NeMo-Skills provides the vision config, whose questions are screenshots.
+This loader uses the standard config with text questions and separate images.
 """
 
 from __future__ import annotations
@@ -30,12 +24,10 @@ _IMAGE_REF_RE = re.compile(r"<image\s+(\d+)>")
 
 
 def load_mmmu_pro(split: str = "test", num_examples: Optional[int] = None) -> List[Example]:
-    """Load MMMU-Pro ``split`` as Examples with the question image(s) attached.
+    """Load the standard split with referenced images attached.
 
-    Per-row data errors (malformed options, a referenced ``<image n>`` whose
-    column is missing) warn and skip the row instead of silently degrading to a
-    text-only / unanswerable sample -- the failure mode behind the original 9%
-    baseline. A single bad row does not abort the whole load.
+    Malformed options or missing referenced images warn and skip the row;
+    these rows cannot be evaluated faithfully as text-only questions.
     """
     from datasets import load_dataset  # lazy: heavy import, benchmark-specific
 
@@ -76,10 +68,7 @@ def _build_example(row, i: int) -> Example:
 def _parse_options(row) -> list:
     options = row.get("options")
     if isinstance(options, str):
-        # HF stores MMMU_Pro options as a Python-literal string ("['a','b',...]"),
-        # not a list; list(str) would split it into characters. literal_eval can
-        # also return a non-list (e.g. a bare quoted string), so the result is
-        # checked -- otherwise list() re-introduces the per-character split.
+        # HF options may be a Python literal; literal_eval can also yield a non-list.
         try:
             options = ast.literal_eval(options)
         except (ValueError, SyntaxError) as e:
@@ -102,13 +91,7 @@ def _normalize_answer(answer) -> Optional[str]:
 
 
 def _images_for_question(row, question: str) -> List:
-    """Pick image_1..image_7 columns referenced by <image n>.
-
-    A referenced ``<image n>`` whose column is missing is a data error and
-    raises -- silently dropping the marker and sending text-only was the
-    original ~40% bug. Rows with no marker fall back to ``image_1`` (then a
-    flat ``image`` column) so an unmarked image is still attached, not dropped.
-    """
+    """Referenced images are required; unmarked questions may use image_1 or image."""
     ids = [int(m.group(1)) for m in _IMAGE_REF_RE.finditer(question)]
     if ids:
         images = []

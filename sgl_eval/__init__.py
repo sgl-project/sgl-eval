@@ -4,7 +4,5 @@ from pathlib import Path
 
 __version__ = "0.1.0"
 
-# Single source of truth for the vendored NeMo-Skills slice path. Used by
-# the dataset loader, the CLI's run-meta provenance reader, and any future
-# consumer that needs to reach into ``_vendored/nemo_skills/``.
+# Shared root for dataset loading and run provenance.
 VENDORED_NS_ROOT = Path(__file__).resolve().parent / "_vendored" / "nemo_skills"

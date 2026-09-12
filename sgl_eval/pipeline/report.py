@@ -1,5 +1,4 @@
-"""Stage 3: stdout summary + ``metrics.json`` + footer + exit code.
-Owns partial-run reporting (sample-level bounds + example breakdown)."""
+"""Report metrics, provenance, and completed-sample counts for partial runs."""
 
 from __future__ import annotations
 
@@ -79,9 +78,7 @@ def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
 
 
 def _read_ns_commit_sha() -> Optional[str]:
-    """Vendored slice's pinned SHA. ``None`` only when the manifest is
-    absent; a malformed manifest is a sync_vendored bug and should surface
-    as YAMLError, not be swallowed."""
+    """An absent manifest omits provenance; malformed YAML must surface."""
     manifest = VENDORED_NS_ROOT / "SOURCES.yaml"
     try:
         text = manifest.read_text()

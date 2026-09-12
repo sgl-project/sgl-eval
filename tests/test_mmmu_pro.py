@@ -24,12 +24,6 @@ def _fake_row(
     question=None,
     images=None,
 ):
-    """Build a fake MMMU_Pro row on the real schema.
-
-    ``images`` maps an ``image_n`` column to a PIL image (referenced by
-    ``<image n>`` in the question); without it, ``with_image`` toggles a plain
-    ``image_1`` column. ``options`` may be a list or the HF literal-string form.
-    """
     from PIL import Image
 
     row = {
@@ -115,8 +109,7 @@ def test_load_mmmu_pro_num_examples(monkeypatch):
 
 
 def test_options_literal_string_parsed_not_char_split(monkeypatch):
-    """HF stores options as a Python-literal string; must parse to a list, not
-    split per character (the original 9% bug)."""
+    """Literal-string options must remain whole choices rather than individual characters."""
     import datasets
 
     fake_ds = [_fake_row(options="['alpha','beta','gamma']", answer="C", with_image=False)]
@@ -177,8 +170,7 @@ def test_missing_referenced_image_warns_and_skips(monkeypatch):
 
 
 def test_options_not_list_warns_and_skips(monkeypatch):
-    """literal_eval returning a non-list (a bare quoted string) -> skip, not
-    per-character split (re-opens the 9% bug)."""
+    """Non-list options must be rejected instead of becoming per-character choices."""
     import datasets
 
     fake_ds = [_fake_row(options="'just a string'", answer="A", with_image=False)]
@@ -216,10 +208,7 @@ def test_mmmu_pro_registered():
 
 
 def test_mmmu_pro_prompt_packaged():
-    """The SE-own 10-choice prompt must ship in the installed package -- the
-    vendored prompts are declared in pyproject package-data, but this one is
-    not, and ``resolve_prompt`` returns a path ``render_prompt`` reads at
-    run time. A missing file crashes the first MMMU-Pro run, not import."""
+    """The SE-owned prompt must be included in installed package data to make rendering work."""
     from sgl_eval.evals._prompts import resolve_prompt
 
     assert resolve_prompt("mmmu-pro-cot").exists()

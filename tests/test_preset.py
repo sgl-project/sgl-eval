@@ -24,8 +24,7 @@ from sgl_eval.types import GenConfig
 
 
 def test_full_preset_round_trip(tmp_path: Path) -> None:
-    """All sections parse and absent fields default cleanly. Covers the
-    minimal-preset case via the inverse: untouched sections stay default."""
+    """Preset parsing must retain provided fields and default omitted fields."""
     p = tmp_path / "full.yaml"
     p.write_text("""
 benchmark: aime24
@@ -192,9 +191,7 @@ def test_same_layer_nested_thinking_beats_flat() -> None:
 
 
 def test_preset_carries_chat_template_kwargs() -> None:
-    """A preset has to be able to replay the run it names. ``enable_thinking``
-    changes the prompt exactly like ``thinking`` does, so a preset without it
-    would silently replay with the model's default thinking state."""
+    """Presets must retain model-specific chat-template keys to reproduce the prompt."""
     default = GenConfig()
     gen = apply_to_gen(
         default, _preset_with(chat_template_kwargs={"enable_thinking": False}), _args()

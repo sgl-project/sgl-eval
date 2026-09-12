@@ -1,11 +1,4 @@
-"""Streaming prediction-writer tests.
-
-Covers the three behaviors the runner depends on:
-  - per-repeat routing into ``output-rs{i}.jsonl``
-  - NS wire-shape fields on every line + every-line flush (crash recovery)
-  - thread safety: concurrent writes from the runner's worker pool don't
-    interleave bytes within a line and don't drop lines
-"""
+"""Check prediction schema, repeat routing, per-record flush, and concurrent writes."""
 
 from __future__ import annotations
 

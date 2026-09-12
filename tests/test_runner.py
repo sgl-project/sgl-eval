@@ -1,9 +1,4 @@
-"""Runner integration test.
-
-Verifies the runner: parallel sample_fn, inline per-sample score_one_fn,
-default mean aggregator, completion-token tally, n_repeats * num_examples
-parallelism, on_sample_scored callback contract.
-"""
+"""Check parallel sampling, caller-thread scoring, aggregation, and partial results."""
 
 from __future__ import annotations
 
@@ -94,8 +89,7 @@ def test_runner_partial_correct():
 
 
 def test_runner_n_repeats_flat_concurrency():
-    """All ``num_examples * n_repeats`` tasks should be submitted to the
-    threadpool, not capped at ``len(examples)``."""
+    """Every example-repeat pair must be sampled; no repeats may be dropped."""
     examples = [Example(id=str(i), inputs={}, target="x") for i in range(4)]
 
     submitted = set()
@@ -120,10 +114,7 @@ def test_runner_n_repeats_flat_concurrency():
 
 
 def test_runner_drops_aborted_samples_serial():
-    """When ``sample_fn`` raises ``WorkerAborted`` (i.e. CLI Ctrl-C closed
-    the httpx client), the serial runner stops, drops examples with no
-    completed repeats, and aligns samples / scores / extracted so partial
-    aggregation works."""
+    """Cancellation drops unfinished samples and preserves aligned results for completed ones."""
     examples = [Example(id=str(i), inputs={}, target="x") for i in range(4)]
 
     counter = {"n": 0}
@@ -154,10 +145,7 @@ def test_runner_drops_aborted_samples_serial():
 
 
 def test_runner_partial_at_sample_level_when_n_repeats_gt_1():
-    """An example that completed only some of its reps is partial too --
-    even though it survives in ``per_example``, the missing reps mean
-    the aggregator's pad-with-last would silently fabricate data, so
-    ``partial`` must surface."""
+    """Incomplete repeats must mark a run partial even when their example survives."""
     examples = [Example(id=str(i), inputs={}, target="x") for i in range(2)]
     counter = {"n": 0}
 
@@ -183,9 +171,6 @@ def test_runner_partial_at_sample_level_when_n_repeats_gt_1():
     assert result.planned_examples == 2
     assert result.num_examples == 1  # ex1 dropped (zero reps)
     assert completed == 2  # ex0 kept 2/3 reps
-    # 2 < 6 planned -> partial fires. Critically, ex0 lives in
-    # per_example with only 2 samples; without sample-level partial
-    # this case would slip through as "complete".
     assert result.partial is True
 
 
@@ -222,9 +207,7 @@ def test_runner_invokes_on_sample_scored():
 
 
 def test_runner_reports_finish_reason_rates():
-    """``stop_rate`` / ``truncated_rate`` over samples surface no-EOS runaways
-    that ``no_answer`` (extraction failure) can't. Half the samples here hit
-    the token cap (``finish_reason="length"``)."""
+    """Stop and truncation rates must reflect sample finish reasons independently of extraction."""
     examples = [Example(id=str(i), inputs={}, target="x") for i in range(4)]
 
     def mixed_sample_fn(ex, _rep_idx):
@@ -292,9 +275,7 @@ def test_runner_omits_finish_reason_rates_when_all_none():
 
 
 def test_runner_reports_error_rate():
-    """``error_rate`` captures samples whose ``finish_reason`` is neither
-    ``stop`` nor ``length`` (e.g. the sampler sets ``"error"`` on a failed
-    request), so request failures aren't hidden behind stop/truncated."""
+    """Request failures must contribute to error_rate instead of disappearing from the summary."""
     examples = [Example(id=str(i), inputs={}, target="x") for i in range(3)]
 
     def errored_sample_fn(ex, _rep_idx):

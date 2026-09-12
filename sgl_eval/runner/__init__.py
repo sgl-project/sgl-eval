@@ -28,8 +28,7 @@ class WorkerAborted(Exception):
 TickFn = Callable[[int, float, Optional[str]], None]
 SampleFn = Callable[..., Sample]
 ScoreOneFn = Callable[[Example, Sample], Tuple[float, Optional[str]]]
-# Streaming-dump hook; fires on whatever thread completed the future, so
-# implementations must be thread-safe.
+# The caller thread invokes this hook after scoring each completed sample.
 OnSampleScoredFn = Callable[[Example, int, Sample, float, Optional[str]], None]
 
 __all__ = [
@@ -94,9 +93,7 @@ def run_examples(
         )
         results = _assemble_results(examples, samples_by_ex, scores_by_ex, extracted_by_ex)
     finally:
-        # Join refresher BEFORE closing bars; otherwise the daemon can be
-        # mid ``bar.refresh()`` at exit and leak bar text into the shell
-        # ("zsh: command not found: aime25").
+        # Stop refreshes before closing bars to avoid output during teardown.
         if stop_refresh is not None:
             stop_refresh.set()
         if refresh_thread is not None:

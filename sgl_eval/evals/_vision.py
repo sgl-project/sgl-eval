@@ -1,14 +1,7 @@
-"""Vision-aware message construction shared by multimodal benchmarks.
+"""Build OpenAI message content from prompts and media.
 
-``build_user_content`` turns a prompt + ``Example.media`` list into an
-OpenAI-style ``content``: a plain string when there is no media (so text
-benchmarks stay byte-for-byte compatible), or a list of text / image_url /
-video_url blocks otherwise. The sampler passes it through unchanged.
-
-Image placement: if the prompt contains ``[image]`` placeholders (left by
-the MMMU-Pro loader after stripping ``<image n>``), images are inserted at
-those positions to preserve in-question order; otherwise ``image_position``
-decides, defaulting to appending after the text.
+Text-only inputs remain strings. Image placeholders take precedence over
+the YAML placement default; unused media follow the text.
 """
 
 from __future__ import annotations
@@ -26,16 +19,10 @@ _IMAGE_PLACEHOLDER = "[image]"
 def build_user_content(
     prompt: str, media: List[MediaItem], image_position: str = "after"
 ) -> ContentType:
-    """Render a user message ``content`` for the given prompt + media.
+    """Return plain text without media, otherwise text/image_url/video_url blocks.
 
-    No media -> plain string (text-benchmark path, unchanged). Images inline
-    as ``data:`` base64; video uses a ``video_url`` block (too large to inline).
-
-    ``image_position`` (from the prompt yaml, see
-    ``_prompts.prompt_media_config``) applies only when the prompt has no
-    ``[image]`` placeholder -- an explicit position always wins. ``"before"``
-    suits screenshot benchmarks, whose text is only an answer-format
-    instruction.
+    Explicit [image] placeholders override image_position. Images without URLs
+    are encoded as data URLs; videos require a server-accessible URL.
     """
     if not media:
         return prompt

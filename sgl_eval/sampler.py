@@ -1,10 +1,4 @@
-"""OpenAI-compatible chat completion sampler.
-
-Adapted from sgl-project/sglang/python/sglang/test/simple_eval_common.py with a
-``Sample`` dataclass return value that exposes ``completion_tokens`` and
-``finish_reason`` as first-class fields (cleaner than the upstream
-side-channel list).
-"""
+"""Sample an OpenAI-compatible chat endpoint and retain response metadata."""
 
 from __future__ import annotations
 
@@ -29,12 +23,7 @@ _MAX_CONNECTIONS = 3600
 
 
 class _LargeHttpxClient(httpx.Client):
-    """httpx client for generations that legitimately take hours.
-
-    The 4h read ceiling is NS's ``InferenceConfig.timeout``. ``connect`` stays
-    short: it cannot affect a score, and 4h x ``max_retries`` on an unreachable
-    endpoint looks like a hang rather than an error.
-    """
+    """Allow the four-hour read timeout used by NeMo-Skills InferenceConfig."""
 
     def __init__(self) -> None:
         timeout = httpx.Timeout(14400, connect=30)
@@ -64,8 +53,7 @@ class ChatCompletionSampler:
 
     @property
     def aborted(self) -> bool:
-        """True if ``abort()`` was called. CLI uses this to decide exit code
-        without needing to share a ``threading.Event`` directly."""
+        """Whether abort() was called; the CLI uses this to select its exit code."""
         return self._abort_event.is_set()
 
     def abort(self) -> None:
@@ -141,11 +129,8 @@ class ChatCompletionSampler:
         if gen.seed is not None:
             kwargs["seed"] = gen.seed
 
-        # NS sends both on every request; unsent, sglang takes them from the
-        # served model's generation_config.json instead -- how the same endpoint
-        # decodes differently here than under NS. top_k stays out because NS
-        # also only sends it when > 0. Neither is an OpenAI API param, so a
-        # strict OpenAI endpoint 400s every request.
+        # Match NS by overriding model-specific generation_config.json defaults.
+        # These extensions require an endpoint that accepts SGLang sampling fields.
         extra_body: Dict[str, Any] = {
             "min_p": gen.min_p,
             "repetition_penalty": gen.repetition_penalty,

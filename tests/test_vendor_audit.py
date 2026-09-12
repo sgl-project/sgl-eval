@@ -1,7 +1,4 @@
-"""CI invariant: every vendored Python file's nemo_skills imports must be
-rewritten under ``sgl_eval._vendored.nemo_skills``. Mirrors
-``scripts/audit_vendored.py``.
-"""
+"""Check translated imports in the vendored NeMo-Skills slice."""
 
 from __future__ import annotations
 
