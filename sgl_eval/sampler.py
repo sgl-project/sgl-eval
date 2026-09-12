@@ -34,36 +34,20 @@ _MAX_CONNECTIONS = 3600
 _TARGET_NOFILE = 65_535
 
 
-def _set_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
-    """Raise the process file-descriptor limit for high-concurrency runs.
-
-    ``--num-threads`` can legitimately exceed the default Linux soft limit of
-    1024. Each in-flight HTTP request needs a socket, and math scoring also
-    creates a short-lived asyncio selector. Without raising the limit, a run
-    can fail partway through with ``EMFILE`` after requests have already
-    reached the server.
-    """
+def _raise_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
+    """Leave room for concurrent HTTP sockets and asyncio selectors."""
     if resource is None:
         return
     try:
         current_soft, current_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    except (OSError, ValueError) as exc:
-        LOG.warning("Could not read RLIMIT_NOFILE: %s", exc)
-        return
-
-    hard_is_infinite = current_hard == getattr(resource, "RLIM_INFINITY", None)
-    desired_soft = target if hard_is_infinite else min(target, current_hard)
-    if current_soft >= desired_soft:
-        return
-    try:
+        desired_soft = (
+            target if current_hard == resource.RLIM_INFINITY else min(target, current_hard)
+        )
+        if current_soft == resource.RLIM_INFINITY or current_soft >= desired_soft:
+            return
         resource.setrlimit(resource.RLIMIT_NOFILE, (desired_soft, current_hard))
     except (OSError, ValueError) as exc:
-        LOG.warning(
-            "Could not raise RLIMIT_NOFILE from %d to %d: %s",
-            current_soft,
-            desired_soft,
-            exc,
-        )
+        LOG.warning("Could not raise RLIMIT_NOFILE: %s", exc)
     else:
         LOG.info("Raised RLIMIT_NOFILE soft limit from %d to %d", current_soft, desired_soft)
 
@@ -94,7 +78,7 @@ class ChatCompletionSampler:
         api_key: str = "EMPTY",
         max_retries: int = 6,
     ) -> None:
-        _set_nofile_soft_limit()
+        _raise_nofile_soft_limit()
         # Hold the httpx client directly so ``abort()`` can close it without
         # reaching into ``OpenAI``'s private ``_client`` attribute.
         self._http = _LargeHttpxClient()

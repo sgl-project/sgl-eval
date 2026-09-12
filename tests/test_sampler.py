@@ -35,67 +35,34 @@ def _stub_response(text: str, completion: int = 7, prompt: int = 11, reasoning: 
     )
 
 
-def test_nofile_soft_limit_is_raised(monkeypatch):
-    calls = []
-    fake_resource = SimpleNamespace(
-        RLIMIT_NOFILE=7,
-        getrlimit=lambda _: (1024, 1_048_576),
-        setrlimit=lambda resource_type, limits: calls.append((resource_type, limits)),
-    )
-    monkeypatch.setattr(sampler_module, "resource", fake_resource)
-
-    sampler_module._set_nofile_soft_limit()
-
-    assert calls == [(7, (sampler_module._TARGET_NOFILE, 1_048_576))]
-
-
-def test_nofile_soft_limit_is_capped_by_hard_limit(monkeypatch):
-    calls = []
-    fake_resource = SimpleNamespace(
-        RLIMIT_NOFILE=7,
-        getrlimit=lambda _: (1024, 4096),
-        setrlimit=lambda resource_type, limits: calls.append((resource_type, limits)),
-    )
-    monkeypatch.setattr(sampler_module, "resource", fake_resource)
-
-    sampler_module._set_nofile_soft_limit()
-
-    assert calls == [(7, (4096, 4096))]
-
-
-def test_nofile_soft_limit_handles_negative_infinity_sentinel(monkeypatch):
+@pytest.mark.parametrize(
+    "soft, hard, expected",
+    [
+        pytest.param(1024, 1_048_576, 65_535, id="raise"),
+        pytest.param(1024, 4096, 4096, id="hard-cap"),
+        pytest.param(1024, -1, 65_535, id="unlimited-hard"),
+        pytest.param(131072, 1_048_576, None, id="already-sufficient"),
+    ],
+)
+def test_nofile_soft_limit(monkeypatch, soft, hard, expected):
     calls = []
     fake_resource = SimpleNamespace(
         RLIMIT_NOFILE=7,
         RLIM_INFINITY=-1,
-        getrlimit=lambda _: (1024, -1),
+        getrlimit=lambda _: (soft, hard),
         setrlimit=lambda resource_type, limits: calls.append((resource_type, limits)),
     )
     monkeypatch.setattr(sampler_module, "resource", fake_resource)
 
-    sampler_module._set_nofile_soft_limit()
+    sampler_module._raise_nofile_soft_limit()
 
-    assert calls == [(7, (sampler_module._TARGET_NOFILE, -1))]
-
-
-def test_nofile_soft_limit_is_unchanged_when_already_sufficient(monkeypatch):
-    calls = []
-    fake_resource = SimpleNamespace(
-        RLIMIT_NOFILE=7,
-        getrlimit=lambda _: (131072, 1_048_576),
-        setrlimit=lambda resource_type, limits: calls.append((resource_type, limits)),
-    )
-    monkeypatch.setattr(sampler_module, "resource", fake_resource)
-
-    sampler_module._set_nofile_soft_limit()
-
-    assert calls == []
+    assert calls == ([] if expected is None else [(7, (expected, hard))])
 
 
 def test_nofile_soft_limit_is_a_noop_without_resource(monkeypatch):
     monkeypatch.setattr(sampler_module, "resource", None)
 
-    sampler_module._set_nofile_soft_limit()
+    sampler_module._raise_nofile_soft_limit()
 
 
 @pytest.mark.parametrize("operation", ["getrlimit", "setrlimit"])
@@ -105,13 +72,15 @@ def test_nofile_soft_limit_logs_and_continues_on_resource_error(monkeypatch, cap
 
     fake_resource = SimpleNamespace(
         RLIMIT_NOFILE=7,
-        getrlimit=raise_oserror if operation == "getrlimit" else lambda _: (1024, 1_048_576),
-        setrlimit=raise_oserror if operation == "setrlimit" else lambda *_: None,
+        RLIM_INFINITY=-1,
+        getrlimit=lambda _: (1024, 1_048_576),
+        setrlimit=lambda *_: None,
     )
+    setattr(fake_resource, operation, raise_oserror)
     monkeypatch.setattr(sampler_module, "resource", fake_resource)
 
     with caplog.at_level(logging.WARNING):
-        sampler_module._set_nofile_soft_limit()
+        sampler_module._raise_nofile_soft_limit()
 
     assert "RLIMIT_NOFILE" in caplog.text
     assert "not permitted" in caplog.text
