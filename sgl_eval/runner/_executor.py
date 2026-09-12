@@ -9,7 +9,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from sgl_eval.types import Example, ExampleResult, Sample
 
 # Duplicated from public ``__init__`` to avoid an import cycle. Keep in sync.
-TickFn = Callable[[int, float], None]
+TickFn = Callable[[int, float, Optional[str]], None]
 SampleFn = Callable[..., Sample]
 ScoreOneFn = Callable[[Example, Sample], Tuple[float, Optional[str]]]
 OnSampleScoredFn = Callable[[Example, int, Sample, float, Optional[str]], None]
@@ -38,7 +38,7 @@ def _run_sample_score_phase(
         extracted_by_ex[ex.id][rep] = extracted
         if on_sample_scored is not None:
             on_sample_scored(ex, rep, sample, score, extracted)
-        tick(rep, score)
+        tick(rep, score, sample.finish_reason)
 
     if workers == 1:
         for ex, rep in tasks:
