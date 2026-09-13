@@ -278,7 +278,9 @@ class HostMiniSweAgent(BaseAgent):
     async def setup(self, environment: BaseEnvironment) -> None:
         return None
 
-    async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
+    async def run(
+        self, instruction: str, environment: BaseEnvironment, context: AgentContext
+    ) -> None:
         loop = asyncio.get_running_loop()
         container = await sandbox.container_id(environment)
         done = threading.Event()
