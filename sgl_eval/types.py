@@ -98,6 +98,12 @@ class RunResult:
     total_prompt_tokens: int = 0
     partial: bool = False
     planned_examples: int = 0
+    # Benchmark-owned provenance and display rows, written to metrics.json as
+    # ``metadata`` by the shared report; must not shadow core fields.
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    # For benchmarks whose sample is a whole agent trajectory: token stats per
+    # model response, kept apart from the per-sample totals above.
+    response_usage: Optional[Dict[str, Any]] = None
 
     @property
     def output_throughput(self) -> float:

@@ -1,14 +1,35 @@
-"""Check that static vendored imports stay translated and independent of SE implementation."""
+"""Check that static vendored imports stay translated and independent of SE implementation.
+
+Each ``sgl_eval/_vendored/<pkg>/SOURCES.yaml`` names its ``upstream_package``
+(``nemo_skills``, ``pier``, ...). Any ``import <upstream_package>...`` left in
+that package's files means an ``import_rewrites`` rule is missing.
+"""
 
 from __future__ import annotations
 
 import ast
 from importlib.util import resolve_name
 from pathlib import Path
-from typing import List
+from typing import Dict, List
+
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR_ROOT = ROOT / "sgl_eval" / "_vendored"
+
+
+def _upstream_packages() -> Dict[Path, str]:
+    """Map each vendored package dir to the upstream import root its manifest declares."""
+    roots: Dict[Path, str] = {}
+    if not VENDOR_ROOT.exists():
+        return roots
+    for manifest in VENDOR_ROOT.glob("*/SOURCES.yaml"):
+        spec = yaml.safe_load(manifest.read_text()) or {}
+        upstream = spec.get("upstream_package")
+        if not upstream:
+            raise ValueError(f"{manifest.relative_to(ROOT)}: missing `upstream_package`")
+        roots[manifest.parent] = upstream
+    return roots
 
 
 def _imported_modules(py: Path) -> List[str]:
@@ -29,21 +50,22 @@ def _imported_modules(py: Path) -> List[str]:
 
 def find_untranslated() -> List[tuple[Path, list[str]]]:
     bad: list[tuple[Path, list[str]]] = []
-    if not VENDOR_ROOT.exists():
-        return bad
-    for py in VENDOR_ROOT.rglob("*.py"):
-        hits = [
-            module
-            for module in _imported_modules(py)
-            if module == "nemo_skills" or module.startswith("nemo_skills.")
-        ]
-        if hits:
-            bad.append((py, hits))
+    for pkg_dir, upstream in _upstream_packages().items():
+        for py in pkg_dir.rglob("*.py"):
+            hits = [
+                module
+                for module in _imported_modules(py)
+                if module == upstream or module.startswith(upstream + ".")
+            ]
+            if hits:
+                bad.append((py, hits))
     return bad
 
 
 def find_se_dependencies() -> List[tuple[Path, list[str]]]:
     bad = []
+    if not VENDOR_ROOT.exists():
+        return bad
     for py in VENDOR_ROOT.rglob("*.py"):
         hits = [
             module
@@ -61,7 +83,7 @@ def main() -> int:
     untranslated = find_untranslated()
     se_dependencies = find_se_dependencies()
     for label, findings in (
-        ("Untranslated nemo_skills imports", untranslated),
+        ("Untranslated upstream imports", untranslated),
         ("Vendored imports of SE implementation", se_dependencies),
     ):
         if findings:
