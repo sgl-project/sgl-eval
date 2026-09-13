@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 from typing import Any, Callable, Dict, Tuple
 
+from sgl_eval.evals._harbor import HarborConfig, make_harbor_spec
 from sgl_eval.evals._loader import load_bundled, load_via_prepare
 from sgl_eval.evals._math import run_math_benchmark
 from sgl_eval.evals._mmmu_pro import load_mmmu_pro
@@ -32,6 +33,11 @@ from sgl_eval.types import GenConfig
 _MMLU_ARCHIVE_REVISION = "c30699e8356da336a370243923dbaf21066bb9fe"
 # Git LFS object digest for data.tar at the pinned Hugging Face revision.
 _MMLU_ARCHIVE_SHA256 = "bec563ba4bac1d6aaf04141cd7d1605d7a5ca833e38f994051e818489592989b"
+
+# datacurve-ai/deep-swe at the 113-task revision the reference scores were
+# produced from; the digest is of GitHub's source tarball for that commit.
+_DEEPSWE_REVISION = "0b9fabbb63b9104d678fe965e1632f2dd9eaa2ea"
+_DEEPSWE_ARCHIVE_SHA256 = "2c3178146ae5d5e4dce988691e90e79c608fcc9d2ea0c9f20ac96e137f73b94b"
 
 _TABLE = [
     {
@@ -137,6 +143,23 @@ _TABLE = [
         # request count, not tokens.
         "default_num_threads": 4,
         "description": "RULER2 synthetic long-context, 12 subtasks (needs --ruler2-seq-len N).",
+    },
+    {
+        # Harbor-format coding-agent tasks run through the vendored pier
+        # trial runtime with mini-swe-agent; needs Docker + Compose on this host.
+        "name": "deepswe",
+        "category": "harbor",
+        "archive_url": (
+            f"https://github.com/datacurve-ai/deep-swe/archive/{_DEEPSWE_REVISION}.tar.gz"
+        ),
+        "archive_sha256": _DEEPSWE_ARCHIVE_SHA256,
+        "tasks_subdir": "tasks",
+        "thinking": True,
+        "default_n_repeats": 1,
+        # One trial = one task container (2 CPUs / 8 GB by task.toml) + one
+        # verifier container, hours long; 64 would flatten any single host.
+        "default_num_threads": 4,
+        "description": "DeepSWE, 113 coding-agent tasks (mini-swe-agent; needs Docker + Compose).",
     },
 ]
 
@@ -303,6 +326,14 @@ _CATEGORIES: Dict[str, Dict[str, Any]] = {
 
 for _entry in _TABLE:
     _name = _entry["name"]
+    if _entry.get("category") == "harbor":
+        _harbor_fields = {"category"}
+        register(
+            make_harbor_spec(
+                HarborConfig(**{k: v for k, v in _entry.items() if k not in _harbor_fields})
+            )
+        )
+        continue
     if "metrics_type" in _entry:
         _metrics_type = _entry["metrics_type"]
         _prompt_basename = _entry["prompt"]
