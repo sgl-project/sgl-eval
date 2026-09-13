@@ -381,7 +381,9 @@ def ensure_tasks_root(cfg: HarborConfig) -> Path:
         top_level = [p for p in staging.iterdir()]
         source = (
             top_level[0]
-            if len(top_level) == 1 and top_level[0].is_dir() and not (staging / cfg.tasks_subdir).exists()
+            if len(top_level) == 1
+            and top_level[0].is_dir()
+            and not (staging / cfg.tasks_subdir).exists()
             else staging
         )
         if dest.exists():
@@ -398,22 +400,48 @@ def ensure_tasks_root(cfg: HarborConfig) -> Path:
 
 
 def _safe_extractall(tar: tarfile.TarFile, dest: Path) -> None:
+    """Extract, refusing members or link targets that escape ``dest``.
+
+    The stdlib ``filter="data"`` is not used: on 3.10.12 through 3.10.13 it
+    resolves relative symlink targets against the destination root instead of
+    the member's directory and rejects in-archive links such as
+    ``tasks/README.md -> ../README.md``.
+    """
+    root = dest.resolve()
+    members = []
+    for member in tar.getmembers():
+        if member.isdev():
+            continue
+        target = (root / member.name).resolve()
+        if not _inside(target, root):
+            raise ValueError(f"archive member {member.name!r} escapes the extraction directory")
+        if member.issym() or member.islnk():
+            base = target.parent if member.issym() else root
+            if not _inside((base / member.linkname).resolve(), root):
+                raise ValueError(f"archive link {member.name!r} points outside the archive")
+        members.append(member)
     try:
-        tar.extractall(dest, filter="data")
-    except TypeError:  # Python without the extraction filter
-        tar.extractall(dest)
+        tar.extractall(dest, members=members, filter="fully_trusted")
+    except TypeError:  # Python without the extraction filter argument
+        tar.extractall(dest, members=members)
 
 
-def select_task_dirs(tasks_root: Path, wanted: List[str], num_examples: Optional[int]) -> List[Path]:
+def _inside(path: Path, root: Path) -> bool:
+    return path == root or str(path).startswith(str(root) + os.sep)
+
+
+def select_task_dirs(
+    tasks_root: Path, wanted: List[str], num_examples: Optional[int]
+) -> List[Path]:
     """Tasks in alphabetical order; ``wanted`` narrows, ``num_examples`` takes the first N."""
-    task_dirs = sorted(
-        p for p in tasks_root.iterdir() if p.is_dir() and (p / "task.toml").exists()
-    )
+    task_dirs = sorted(p for p in tasks_root.iterdir() if p.is_dir() and (p / "task.toml").exists())
     if wanted:
         by_name = {p.name: p for p in task_dirs}
         missing = [name for name in wanted if name not in by_name]
         if missing:
-            raise ValueError(f"unknown task(s) {missing}; task ids are the directory names under {tasks_root}")
+            raise ValueError(
+                f"unknown task(s) {missing}; task ids are the directory names under {tasks_root}"
+            )
         task_dirs = [by_name[name] for name in wanted]
     if num_examples is not None:
         task_dirs = task_dirs[:num_examples]
@@ -509,9 +537,14 @@ def _endpoint_context_length(sampler: ChatCompletionSampler) -> Optional[int]:
 def _tools_smoke(sampler: ChatCompletionSampler, gen: GenConfig) -> None:
     from sgl_eval._vendored.mini_swe_agent.models.utils.actions_toolcall import BASH_TOOL
 
-    smoke_gen = dataclasses.replace(gen, max_tokens=min(gen.max_tokens or _SMOKE_MAX_TOKENS, _SMOKE_MAX_TOKENS))
+    smoke_gen = dataclasses.replace(
+        gen, max_tokens=min(gen.max_tokens or _SMOKE_MAX_TOKENS, _SMOKE_MAX_TOKENS)
+    )
     messages = [
-        {"role": "user", "content": "Use the bash tool to run exactly this command: echo sgl-eval-smoke"}
+        {
+            "role": "user",
+            "content": "Use the bash tool to run exactly this command: echo sgl-eval-smoke",
+        }
     ]
     try:
         response = sampler.complete_raw(
@@ -720,7 +753,9 @@ async def _execute(
         progress.close()
     for trial, outcome in zip(pending, outcomes):
         if isinstance(outcome, Exception):
-            print(f"ERROR: trial {trial.name}: {type(outcome).__name__}: {outcome}", file=sys.stderr)
+            print(
+                f"ERROR: trial {trial.name}: {type(outcome).__name__}: {outcome}", file=sys.stderr
+            )
     return results
 
 
