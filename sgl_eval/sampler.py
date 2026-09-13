@@ -130,12 +130,19 @@ class ChatCompletionSampler:
         *,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Any] = None,
+        stream: bool = False,
     ) -> Any:
         """One chat completion returned as the SDK object; every failure raises.
 
         Agent loops need the full message (``tool_calls``, ``reasoning_content``)
         and must see transport errors as errors, so unlike ``__call__`` there
         is no retry here and no empty-``Sample`` fallback.
+
+        With ``stream=True`` the completion is streamed and reassembled into the
+        same ``ChatCompletion`` shape. Closing an httpx client does not wake a
+        thread blocked in a socket read, so this is what makes ``abort()`` take
+        effect mid-generation: the stream is checked between chunks and closed,
+        which also lets the server drop the request.
         """
         if self._abort_event.is_set():
             raise WorkerAborted()
@@ -146,7 +153,80 @@ class ChatCompletionSampler:
             kwargs["tools"] = tools
         if tool_choice is not None:
             kwargs["tool_choice"] = tool_choice
-        return self.client.chat.completions.create(**kwargs)
+        if not stream:
+            return self.client.chat.completions.create(**kwargs)
+        return self._stream_completion(kwargs)
+
+    def _stream_completion(self, kwargs: Dict[str, Any]) -> Any:
+        from openai.types.chat import ChatCompletion
+
+        response = self.client.chat.completions.create(
+            stream=True, stream_options={"include_usage": True}, **kwargs
+        )
+        content: List[str] = []
+        reasoning: List[str] = []
+        tool_calls: Dict[int, Dict[str, Any]] = {}
+        finish_reason: Optional[str] = None
+        usage: Optional[Dict[str, Any]] = None
+        head: Dict[str, Any] = {}
+        try:
+            for chunk in response:
+                if self._abort_event.is_set():
+                    raise WorkerAborted()
+                if not head and chunk.id:
+                    head = {"id": chunk.id, "created": chunk.created, "model": chunk.model}
+                if chunk.usage is not None:
+                    usage = chunk.usage.model_dump()
+                for choice in chunk.choices:
+                    if choice.index != 0:
+                        continue
+                    delta = choice.delta
+                    if delta.content:
+                        content.append(delta.content)
+                    # sglang / DeepSeek-style endpoints stream the thinking separately.
+                    reasoning_delta = getattr(delta, "reasoning_content", None)
+                    if reasoning_delta:
+                        reasoning.append(reasoning_delta)
+                    for call in delta.tool_calls or []:
+                        slot = tool_calls.setdefault(
+                            call.index,
+                            {
+                                "id": None,
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            },
+                        )
+                        if call.id:
+                            slot["id"] = call.id
+                        if call.function is not None:
+                            if call.function.name:
+                                slot["function"]["name"] = call.function.name
+                            if call.function.arguments:
+                                slot["function"]["arguments"] += call.function.arguments
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+        finally:
+            response.close()
+
+        message: Dict[str, Any] = {
+            "role": "assistant",
+            "content": "".join(content) or None,
+            "tool_calls": [tool_calls[index] for index in sorted(tool_calls)] or None,
+        }
+        if reasoning:
+            message["reasoning_content"] = "".join(reasoning)
+        return ChatCompletion.model_validate(
+            {
+                "id": head.get("id") or "",
+                "object": "chat.completion",
+                "created": head.get("created") or 0,
+                "model": head.get("model") or self.model,
+                "choices": [
+                    {"index": 0, "finish_reason": finish_reason or "stop", "message": message}
+                ],
+                "usage": usage,
+            }
+        )
 
     def _resolve_default_model(self) -> str:
         models = self.client.models.list().data

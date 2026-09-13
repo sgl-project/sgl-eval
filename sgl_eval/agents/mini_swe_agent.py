@@ -59,6 +59,7 @@ MINI_CONFIG_PATH = (
 )
 _WORKER_EXIT_GRACE_SEC = 120
 _SLEEP_SLICE_SEC = 0.25
+_WAIT_SLICE_SEC = 1.0
 
 
 @dataclass
@@ -185,7 +186,9 @@ class SglEvalModel(LitellmModel):
     def _query(self, messages: List[dict], **kwargs: Any):
         self._cancel.check()
         wire = [_wire_message(message) for message in messages]
-        return self._sampler.complete_raw(wire, self._gen, tools=[BASH_TOOL])
+        # Streamed so a cancelled trial stops the request at the next chunk
+        # instead of waiting out the whole generation.
+        return self._sampler.complete_raw(wire, self._gen, tools=[BASH_TOOL], stream=True)
 
     def _calculate_cost(self, response) -> Dict[str, float]:
         return {"cost": 0.0}
@@ -294,16 +297,22 @@ class HostMiniSweAgent(BaseAgent):
             finally:
                 done.set()
 
-        future = loop.run_in_executor(None, work)
+        # A daemon thread, not the executor: a worker stuck in a socket read must
+        # never keep the interpreter from exiting. The loop only ever waits on
+        # ``done`` in short slices, so no executor thread can get stuck either.
+        threading.Thread(target=work, name="mini-swe-agent", daemon=True).start()
         try:
-            await future
+            while not await loop.run_in_executor(None, done.wait, _WAIT_SLICE_SEC):
+                pass
         except asyncio.CancelledError:
             # pier's agent deadline or a run cancellation. Stop the model call
             # and the in-container command, then let the worker unwind before
             # upstream collects the workspace.
             self._trial_cancel.set()
             self._abort_transport()
-            await loop.run_in_executor(None, done.wait, _WORKER_EXIT_GRACE_SEC)
+            deadline = time.monotonic() + _WORKER_EXIT_GRACE_SEC
+            while not done.is_set() and time.monotonic() < deadline:
+                await loop.run_in_executor(None, done.wait, _WAIT_SLICE_SEC)
             self._populate_context(context)
             raise
         finally:

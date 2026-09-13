@@ -25,6 +25,7 @@ import dataclasses
 import json
 import os
 import shutil
+import signal
 import sys
 import tarfile
 import tempfile
@@ -744,6 +745,11 @@ async def _execute(
     # Every running trial parks one worker thread on the agent loop and may
     # need a second for cancellation; the default pool is too small for that.
     loop.set_default_executor(ThreadPoolExecutor(max_workers=max(8, num_threads * 3)))
+    # Route the CLI's SIGINT handler through the loop's wakeup fd: a signal
+    # delivered to a worker thread otherwise waits until the loop wakes on its own.
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    if callable(previous_sigint):
+        loop.add_signal_handler(signal.SIGINT, previous_sigint, signal.SIGINT, None)
 
     progress = _Progress(cfg.name, len(pending))
     queue = TrialQueue(
@@ -773,6 +779,9 @@ async def _execute(
     finally:
         watcher.cancel()
         progress.close()
+        if callable(previous_sigint):
+            loop.remove_signal_handler(signal.SIGINT)
+            signal.signal(signal.SIGINT, previous_sigint)
     for trial, outcome in zip(pending, outcomes):
         if isinstance(outcome, Exception):
             print(
