@@ -651,13 +651,23 @@ def _load_result(trial_dir: Path, name: str):
 
 
 class _Progress:
-    """One bar over trials with live phase counts; finalized results move the counters."""
+    """One bar over trials with live phase counts; finalized results move the counters.
+
+    Without a terminal (a log file) the bar would be rewritten twice a second
+    for hours, so it is replaced by one line per finished trial.
+    """
 
     def __init__(self, name: str, total: int) -> None:
-        self.bar = tqdm(total=total, desc=name, dynamic_ncols=True)
+        self.name = name
+        self.total = total
+        self.tty = sys.stderr.isatty()
+        self.bar = tqdm(total=total, desc=name, dynamic_ncols=True, disable=not self.tty)
         self.phase: Dict[str, str] = {}
         self.resolved = self.failed = self.errored = 0
-        self._stop, self._thread = _start_bar_refresher([self.bar])
+        if self.tty:
+            self._stop, self._thread = _start_bar_refresher([self.bar])
+        else:
+            self._stop, self._thread = None, None
 
     async def on_event(self, event: Any) -> None:
         from sgl_eval._vendored.pier.trial.hooks import TrialEvent
@@ -672,7 +682,7 @@ class _Progress:
             self.phase.pop(event.trial_id, None)
         self._refresh()
 
-    def finalized(self, reward: float, errored: bool) -> None:
+    def finalized(self, trial: str, reward: float, errored: bool) -> None:
         if reward >= 1.0:
             self.resolved += 1
         else:
@@ -681,8 +691,18 @@ class _Progress:
             self.errored += 1
         self.bar.update(1)
         self._refresh()
+        if not self.tty:
+            done = self.resolved + self.failed
+            print(
+                f"[{self.name}] {done}/{self.total} finished: {trial} reward={reward:g}"
+                f"{' errored' if errored else ''} | resolved={self.resolved} "
+                f"failed={self.failed} errored={self.errored}",
+                flush=True,
+            )
 
     def _refresh(self) -> None:
+        if not self.tty:
+            return
         phases = list(self.phase.values())
         self.bar.set_postfix(
             {
@@ -697,8 +717,10 @@ class _Progress:
         )
 
     def close(self) -> None:
-        self._stop.set()
-        self._thread.join(timeout=2.0)
+        if self._stop is not None:
+            self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         self.bar.close()
 
 
@@ -742,7 +764,7 @@ async def _execute(
         result = _load_result(trials_dir / trial.name, trial.name)
         ledger.mark(trial.name, "finalized")
         results[trial.name] = result
-        progress.finalized(_reward_of(result), result.exception_info is not None)
+        progress.finalized(trial.name, _reward_of(result), result.exception_info is not None)
 
     tasks = [asyncio.create_task(run_one(trial)) for trial in pending]
     watcher = asyncio.create_task(_cancel_on_event(cancel_event, tasks))
