@@ -75,7 +75,7 @@ def exec_action(
     """
     action_id = uuid.uuid4().hex
     launcher = (
-        f"mkdir -p {_PID_DIR} && echo $$ > {_PID_DIR}/{action_id}.pid && exec /bin/sh -c \"$1\""
+        f'mkdir -p {_PID_DIR} && echo $$ > {_PID_DIR}/{action_id}.pid && exec /bin/sh -c "$1"'
     )
     argv: List[str] = [docker, "exec", "-w", cwd]
     for key, value in env.items():
@@ -118,12 +118,23 @@ def _kill_and_collect(proc: subprocess.Popen, container: str, action_id: str, do
 
 
 def kill_process_group(container: str, action_id: str, *, docker: str = "docker") -> None:
-    """Kill the action's process group (then its leader) inside the container."""
+    """Kill every process in the action's process group inside the container.
+
+    The group is enumerated from ``/proc/*/stat`` rather than ``kill -- -pgid``:
+    the shell builtin's negative-pid form is not portable across the sh
+    flavors task images ship (busybox ash rejects it).
+    """
     pid_file = f"{_PID_DIR}/{action_id}.pid"
     script = (
-        f"p=$(cat {pid_file} 2>/dev/null); "
-        f'if [ -n "$p" ]; then kill -KILL -- -"$p" 2>/dev/null; kill -KILL "$p" 2>/dev/null; fi; '
-        f"rm -f {pid_file}"
+        f"p=$(cat {pid_file} 2>/dev/null); rm -f {pid_file}; "
+        '[ -n "$p" ] || exit 0; '
+        "for round in 1 2; do "
+        "for f in /proc/[0-9]*/stat; do "
+        's=$(cat "$f" 2>/dev/null) || continue; '
+        "pid=${s%% *}; rest=${s##*) }; set -- $rest; "
+        '[ "$3" = "$p" ] && kill -9 "$pid" 2>/dev/null; '
+        "done; done; "
+        'kill -9 "$p" 2>/dev/null; exit 0'
     )
     try:
         subprocess.run(
@@ -194,7 +205,9 @@ def host_preflight(
 ) -> List[str]:
     """Fail fast when Docker trials cannot run; return non-fatal warnings."""
     if shutil.which(docker) is None:
-        raise HostPreflightError("`docker` is not on PATH; install Docker Engine or Docker Desktop.")
+        raise HostPreflightError(
+            "`docker` is not on PATH; install Docker Engine or Docker Desktop."
+        )
     try:
         info = subprocess.run(
             [docker, "info", "--format", "{{.DockerRootDir}}\t{{.NCPU}}\t{{.MemTotal}}"],
