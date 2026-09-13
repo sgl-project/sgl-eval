@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import pkgutil
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, FrozenSet, List, Optional
 
 from sgl_eval.predictions import PredSchema
 from sgl_eval.types import GenConfig, RunResult
@@ -27,6 +28,27 @@ class EvalSpec:
     pred_schema: PredSchema = field(default_factory=PredSchema)
     # Names must use --<benchmark>-* so prepare_run can collect their values.
     add_arguments: Optional[Callable[[Any], None]] = None
+    # Keeps per-trial state on disk, so an existing --run-dir can be continued.
+    resumable: bool = False
+    # Given the collected --<benchmark>-* values, whether a model endpoint is
+    # needed at all (an oracle mode that replays reference solutions is not).
+    requires_endpoint: Optional[Callable[[Dict[str, Any]], bool]] = None
+    # bench_args keys that are recovery operations rather than evaluation
+    # inputs; left out of the run_config.json fingerprint guarding resumes.
+    fingerprint_exclude: FrozenSet[str] = frozenset()
+
+
+def collect_bench_args(args: argparse.Namespace, name: str) -> Dict[str, Any]:
+    """The ``--<benchmark>-*`` values, keyed without the prefix.
+
+    Generated-dataset options also identify the run in metrics.json.
+    """
+    prefix = f"{name}_"
+    return {
+        key[len(prefix) :]: value
+        for key, value in vars(args).items()
+        if key.startswith(prefix) and value is not None
+    }
 
 
 _REGISTRY: Dict[str, EvalSpec] = {}

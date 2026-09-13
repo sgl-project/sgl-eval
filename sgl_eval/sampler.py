@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import resource
@@ -49,8 +49,8 @@ def _raise_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
 class _LargeHttpxClient(httpx.Client):
     """Allow the four-hour read timeout used by NeMo-Skills InferenceConfig."""
 
-    def __init__(self) -> None:
-        timeout = httpx.Timeout(14400, connect=30)
+    def __init__(self, request_timeout: float = 14400) -> None:
+        timeout = httpx.Timeout(request_timeout, connect=30)
         limits = httpx.Limits(
             max_keepalive_connections=_MAX_CONNECTIONS, max_connections=_MAX_CONNECTIONS
         )
@@ -66,15 +66,40 @@ class ChatCompletionSampler:
         model: Optional[str] = None,
         api_key: str = "EMPTY",
         max_retries: int = 6,
+        *,
+        request_timeout: float = 14400,
+        sdk_max_retries: Optional[int] = None,
     ) -> None:
         _raise_nofile_soft_limit()
+        self._base_url = base_url
+        self._api_key = api_key
         # Hold the httpx client directly so ``abort()`` can close it without
         # reaching into ``OpenAI``'s private ``_client`` attribute.
-        self._http = _LargeHttpxClient()
-        self.client = OpenAI(base_url=base_url, api_key=api_key, http_client=self._http)
+        self._http = _LargeHttpxClient(request_timeout)
+        client_kwargs: Dict[str, Any] = {}
+        if sdk_max_retries is not None:
+            client_kwargs["max_retries"] = sdk_max_retries
+        self.client = OpenAI(
+            base_url=base_url, api_key=api_key, http_client=self._http, **client_kwargs
+        )
         self.model = model or self._resolve_default_model()
         self.max_retries = max_retries
         self._abort_event = threading.Event()
+
+    def derive(self, *, request_timeout: float, sdk_max_retries: int) -> "ChatCompletionSampler":
+        """A sampler for the same endpoint and model with its own HTTP client.
+
+        ``abort()`` on the derived sampler closes only its own connections, so
+        one agent trial can be stopped without touching the others.
+        """
+        return ChatCompletionSampler(
+            base_url=self._base_url,
+            model=self.model,
+            api_key=self._api_key,
+            max_retries=self.max_retries,
+            request_timeout=request_timeout,
+            sdk_max_retries=sdk_max_retries,
+        )
 
     @property
     def aborted(self) -> bool:
@@ -89,10 +114,39 @@ class ChatCompletionSampler:
         ``WorkerAborted``. Idempotent.
         """
         self._abort_event.set()
+        self.close()
+
+    def close(self) -> None:
+        """Release the HTTP connections without flagging an abort."""
         try:
             self._http.close()
         except Exception:
             pass
+
+    def complete_raw(
+        self,
+        messages: MessageList,
+        gen: GenConfig,
+        *,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Any] = None,
+    ) -> Any:
+        """One chat completion returned as the SDK object; every failure raises.
+
+        Agent loops need the full message (``tool_calls``, ``reasoning_content``)
+        and must see transport errors as errors, so unlike ``__call__`` there
+        is no retry here and no empty-``Sample`` fallback.
+        """
+        if self._abort_event.is_set():
+            raise WorkerAborted()
+        if gen.system_message:
+            messages = [self.pack_message("system", gen.system_message), *messages]
+        kwargs = self._build_kwargs(messages, gen)
+        if tools is not None:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
+        return self.client.chat.completions.create(**kwargs)
 
     def _resolve_default_model(self) -> str:
         models = self.client.models.list().data

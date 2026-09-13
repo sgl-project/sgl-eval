@@ -201,6 +201,9 @@ def _math_run(name: str, prompt_basename: str, loader: Callable):
         load_examples=None,
         bench_args=None,
         prompt_yaml=None,
+        run_dir=None,
+        resume=False,
+        cancel_event=None,
     ):
         return run_math_benchmark(
             name=name,
@@ -231,6 +234,9 @@ def _mcq_run(name: str, prompt_basename: str, loader: Callable):
         load_examples=None,
         bench_args=None,
         prompt_yaml=None,
+        run_dir=None,
+        resume=False,
+        cancel_event=None,
     ):
         return run_multichoice_benchmark(
             name=name,
@@ -259,6 +265,9 @@ def _ruler2_run(name: str, _prompt_basename: str, _loader: Callable):
         load_examples=None,
         bench_args=None,
         prompt_yaml=None,
+        run_dir=None,
+        resume=False,
+        cancel_event=None,
     ):
         if prompt_yaml is not None:
             raise ValueError(

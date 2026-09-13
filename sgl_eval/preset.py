@@ -265,7 +265,7 @@ class ResolvedRunInputs:
     """Run settings after CLI, preset, and benchmark-default resolution."""
 
     benchmark: str
-    base_url: str
+    base_url: Optional[str]
     model: Optional[str]
     n_repeats: int
     num_examples: Optional[int]
@@ -302,8 +302,13 @@ def resolve_run_inputs(
         sys.exit("error: benchmark name required (positional arg or --preset)")
     spec = spec_lookup(benchmark)
 
+    from sgl_eval.registry import collect_bench_args
+
+    endpoint_required = True
+    if getattr(spec, "requires_endpoint", None) is not None:
+        endpoint_required = spec.requires_endpoint(collect_bench_args(args, spec.name))
     base_url = pick(args.base_url, preset.endpoint.base_url if preset else None)
-    if not base_url:
+    if not base_url and endpoint_required:
         detail = "; built-in model presets do not set endpoints" if model_preset is not None else ""
         sys.exit(
             "error: --base-url required "
