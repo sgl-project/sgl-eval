@@ -9,6 +9,7 @@
 # `synced_from_sha`. Mirror in `pyproject.toml` directly.
 
 upstream_repo: NVIDIA/NeMo-Skills
+upstream_package: nemo_skills
 upstream_branch: main
 synced_from_sha: 645cf567ff08c0ae9cc3fc8e1edbb975b3067816
 synced_at: "2026-04-29"

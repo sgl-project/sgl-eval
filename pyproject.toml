@@ -20,6 +20,8 @@ keywords = [
     "gpqa",
     "mmlu",
     "gsm8k",
+    "deepswe",
+    "coding-agent",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -52,6 +54,16 @@ dependencies = [
     "pillow>=10,<12",
     # RULER2 grader (vendored evaluator/ruler.py imports this at module level)
     "editdistance>=0.6,<1",
+    # Vendored pier trial runtime + mini-swe-agent loop (deepswe). All small
+    # and pure Python; Docker + Compose on the host is the real prerequisite.
+    "pydantic>=2,<3",
+    "tenacity>=8,<10",
+    "jinja2>=3.1,<4",
+    "toml>=0.10,<1",
+    "shortuuid>=1.0,<2",
+    "dirhash>=0.2,<1",
+    "typing_extensions>=4.5",
+    "tomli>=2.0,<3; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -90,6 +102,17 @@ exclude = ["tests*", "scripts*"]
     "prompts/*.yaml",
     "dataset/*/__init__.py",
     "dataset/*/test.txt",
+]
+"sgl_eval._vendored.pier" = [
+    "SOURCES.yaml",
+    "LICENSE",
+    "NOTICE",
+    "environments/docker/*.yaml",
+]
+"sgl_eval._vendored.mini_swe_agent" = [
+    "SOURCES.yaml",
+    "LICENSE.md",
+    "config/*.yaml",
 ]
 "sgl_eval.evals" = ["prompts/*.yaml"]
 
