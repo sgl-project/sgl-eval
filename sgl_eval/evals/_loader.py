@@ -76,7 +76,10 @@ def _select_rows(
     rows: List[Tuple[int, dict]] = []
     with path.open("rt", encoding="utf-8") as f:
         for i, line in enumerate(f):
-            rows.append((i, json.loads(line)))
+            try:
+                rows.append((i, json.loads(line)))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{i + 1}: prepare wrote invalid JSON: {exc}") from exc
             if sample_seed is None and num_examples and len(rows) >= num_examples:
                 break
     if sample_seed is not None and num_examples and num_examples < len(rows):
@@ -173,7 +176,7 @@ def load_via_prepare(
     def loader(num_examples: Optional[int]) -> List[Example]:
         cache_dir = _CACHE_ROOT / name
         cache_path = cache_dir / output_basename
-        if not cache_path.exists():
+        if not _cache_is_valid(cache_path):
             mod = importlib.import_module(f"sgl_eval._vendored.nemo_skills.dataset.{name}.prepare")
             _CACHE_ROOT.mkdir(parents=True, exist_ok=True)
             # Same filesystem as the cache, so the commits below are renames.
@@ -189,15 +192,45 @@ def load_via_prepare(
                     archive_sha256,
                 )
                 cache_dir.mkdir(parents=True, exist_ok=True)
-                # The JSONL marks the cache ready, so it commits last.
+                # The marker makes the cache readable, so it commits last.
                 if media_dir:
                     _swap_tree(staging / media_dir, cache_dir / media_dir, staging)
-                os.replace(staging / output_basename, cache_path)
+                _commit_with_marker(staging / output_basename, cache_path)
             finally:
                 shutil.rmtree(staging, ignore_errors=True)
         return _read_jsonl(cache_path, name, num_examples, media_field, cache_dir, sample_seed)
 
     return loader
+
+
+def _cache_marker(cache_path: Path) -> Path:
+    return cache_path.with_name(cache_path.name + ".sha256")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(_DOWNLOAD_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cache_is_valid(cache_path: Path) -> bool:
+    """The marker lands last and pins the digest, so anything a finished prepare
+    did not commit re-prepares rather than being read as data."""
+    marker = _cache_marker(cache_path)
+    if not (cache_path.is_file() and marker.is_file()):
+        return False
+    return marker.read_text().strip() == _file_sha256(cache_path)
+
+
+def _commit_with_marker(staged: Path, cache_path: Path) -> None:
+    # Two renames are not one step; whoever catches the gap re-prepares.
+    digest = _file_sha256(staged)
+    staged_marker = _cache_marker(staged)
+    staged_marker.write_text(digest + "\n")
+    os.replace(staged, cache_path)
+    os.replace(staged_marker, _cache_marker(cache_path))
 
 
 def _run_prepare(
