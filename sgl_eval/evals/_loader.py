@@ -216,9 +216,8 @@ def _file_sha256(path: Path) -> str:
 
 
 def _cache_is_valid(cache_path: Path) -> bool:
-    """Only what a finished prepare committed counts as cached. The marker lands
-    last and pins the digest, so a torn write, an interrupted prepare or a later
-    edit re-prepares instead of being read as data."""
+    """The marker lands last and pins the digest, so anything a finished prepare
+    did not commit re-prepares rather than being read as data."""
     marker = _cache_marker(cache_path)
     if not (cache_path.is_file() and marker.is_file()):
         return False
@@ -226,9 +225,7 @@ def _cache_is_valid(cache_path: Path) -> bool:
 
 
 def _commit_with_marker(staged: Path, cache_path: Path) -> None:
-    # Two renames cannot be one atomic step; a reader that catches the gap, or a
-    # marker left describing another writer's file, re-prepares rather than
-    # reading something unvouched for.
+    # Two renames are not one step; whoever catches the gap re-prepares.
     digest = _file_sha256(staged)
     staged_marker = _cache_marker(staged)
     staged_marker.write_text(digest + "\n")

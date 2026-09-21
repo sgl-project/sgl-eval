@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import types
 from pathlib import Path
 
@@ -10,10 +9,8 @@ import pytest
 
 from sgl_eval.evals import _loader
 
-_ROW = json.dumps({"problem": "q", "expected_answer": "A"}) + "\n"
 
-
-def _install(monkeypatch, tmp_path, calls, payload=_ROW):
+def _install(monkeypatch, tmp_path, calls, payload='{"problem": "q", "expected_answer": "A"}\n'):
     mod = types.ModuleType("fake_prepare")
     mod.__file__ = str(tmp_path / "site_packages" / "gpqa" / "prepare.py")
 
@@ -50,8 +47,9 @@ def test_unvouched_cache_is_rebuilt(tmp_path, monkeypatch, damage):
 
 
 def test_invalid_row_names_the_file_and_line(tmp_path, monkeypatch):
-    """The digest vouches for the bytes, not for prepare's output being JSON."""
-    _install(monkeypatch, tmp_path, [], payload=_ROW + '{"problem": \n')
+    _install(
+        monkeypatch, tmp_path, [], payload='{"problem": "q", "expected_answer": "A"}\n{"p": \n'
+    )
 
     with pytest.raises(ValueError, match=r"test\.jsonl:2: prepare wrote invalid JSON"):
         _loader.load_via_prepare("gpqa", ["test"], {})(None)
