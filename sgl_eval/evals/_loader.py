@@ -209,14 +209,8 @@ def _run_prepare(
     archive_url: Optional[str],
     archive_sha256: Optional[str],
 ) -> None:
-    """Run a vendored prepare script with its output redirected to ``out_dir``.
-
-    Every script derives its output dir from its own ``__file__``, so
-    unredirected they write into the installed package -- one path shared by
-    every process on the machine. Hijacking ``__file__`` is how ``URL`` is
-    redirected below. Inputs bound at import time (mmlu_pro's ``SUBSETS_DIR``)
-    still resolve against the real package.
-    """
+    """Vendored prepare scripts write beside their own ``__file__``; point it at
+    ``out_dir`` so nothing lands in the installed package."""
     original_file = mod.__file__
     mod.__file__ = str(out_dir / "prepare.py")
     try:
@@ -303,9 +297,8 @@ def _download_verified_archive(
 
 
 def _swap_tree(src: Path, dst: Path, trash_dir: Path) -> None:
-    """Replace ``dst`` with ``src``. ``os.replace`` cannot swap a non-empty
-    directory, so an existing tree is renamed aside rather than deleted in
-    place, leaving a reader of it a valid path for the whole call."""
+    """``os.replace`` cannot swap a non-empty directory, so rename the old tree
+    aside rather than deleting it under a reader."""
     if not src.is_dir():
         raise FileNotFoundError(f"prepare.py produced no media dir at {src}")
     if dst.exists():
