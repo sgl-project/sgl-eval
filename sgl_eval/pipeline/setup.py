@@ -43,15 +43,18 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
     inputs = resolve_run_inputs(args, get)
     spec = get(inputs.benchmark)
 
-    sampler = ChatCompletionSampler(
-        base_url=inputs.base_url, model=inputs.model, api_key=args.api_key
-    )
     _warn_if_greedy_repeats(inputs.n_repeats, inputs.gen)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     run_dir = Path(args.out_dir).expanduser() / f"sgl_eval_{spec.name}_{stamp}"
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Run directory: {run_dir}")
+    sampler = ChatCompletionSampler(
+        base_url=inputs.base_url,
+        model=inputs.model,
+        api_key=args.api_key,
+        stream_dir=run_dir / "streams" if getattr(args, "stream", False) else None,
+    )
 
     writer = (
         PredictionsWriter(run_dir, inputs.n_repeats, spec.pred_schema)
