@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import types
+from pathlib import Path
 
 import pytest
 
@@ -60,11 +61,14 @@ def _fake_prepare_module(tmp_path, rows, image_names):
     mod.__file__ = str(vendored_dir / "prepare.py")
 
     def save_data(split):
-        images_dir = vendored_dir / "images"
+        # Mirrors the real script: every path derives from __file__, which the
+        # loader redirects to a staging dir for the call.
+        data_dir = Path(mod.__file__).absolute().parent
+        images_dir = data_dir / "images"
         images_dir.mkdir(exist_ok=True)
         for name in image_names:
             (images_dir / name).write_bytes(b"\x89PNG" + name.encode())
-        with (vendored_dir / f"{split}.jsonl").open("w") as f:
+        with (data_dir / f"{split}.jsonl").open("w") as f:
             for row in rows:
                 f.write(json.dumps(row) + "\n")
 
@@ -94,8 +98,8 @@ def test_media_sidecar_moves_out_of_vendored(prepared):
     cache_dir = tmp_path / "cache" / "mmmu_pro_vision"
     assert (cache_dir / "test.jsonl").is_file()
     assert (cache_dir / "images" / "a.png").is_file()
-    # _vendored must not retain generated data.
-    assert not (vendored_dir / "images").exists()
+    # The install tree is never written to, not even transiently.
+    assert list(vendored_dir.iterdir()) == []
 
     assert len(examples) == 2
     assert [m.mime for ex in examples for m in ex.media] == ["image/png", "image/png"]
@@ -121,8 +125,7 @@ def test_num_examples_truncates_before_reading_media(prepared):
 
 
 def test_second_load_serves_from_cache(prepared):
-    """A cached run must not re-invoke save_data (whose sidecar is already
-    gone from _vendored)."""
+    """A cached run must not re-invoke save_data, whose staging dir is gone."""
     tmp_path, vendored_dir = prepared
     loader = _loader.load_via_prepare(
         "mmmu_pro_vision", ["test"], media_dir="images", media_field="image_path"

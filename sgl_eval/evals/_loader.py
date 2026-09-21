@@ -175,29 +175,68 @@ def load_via_prepare(
         cache_path = cache_dir / output_basename
         if not cache_path.exists():
             mod = importlib.import_module(f"sgl_eval._vendored.nemo_skills.dataset.{name}.prepare")
-            vendored_dir = Path(mod.__file__).resolve().parent
-            if archive_url:
-                _save_data_from_verified_archive(
+            _CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+            # Same filesystem as the cache, so the commits below are renames.
+            staging = Path(tempfile.mkdtemp(prefix=f".staging-{name}-", dir=_CACHE_ROOT))
+            try:
+                _run_prepare(
                     mod,
+                    staging,
                     save_args,
                     save_kwargs,
+                    argparse_main,
                     archive_url,
                     archive_sha256,
-                    cache_dir,
                 )
-            elif argparse_main:
-                mod.main(argparse.Namespace(split=save_args[0], **save_kwargs))
-            else:
-                mod.save_data(*save_args, **save_kwargs)
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(vendored_dir / output_basename), str(cache_path))
-            # save_data writes beside __file__; move media with the JSONL
-            # to preserve its relative paths in the cache.
-            if media_dir:
-                _move_tree(vendored_dir / media_dir, cache_dir / media_dir)
+                # Created only once prepare succeeded, so a failed run leaves no
+                # dataset dir behind for the next one to mistake for a cache.
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                # Media first: the JSONL is what marks the cache ready, so
+                # committing it last never exposes rows whose media is missing.
+                if media_dir:
+                    _swap_tree(staging / media_dir, cache_dir / media_dir, staging)
+                os.replace(staging / output_basename, cache_path)
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
         return _read_jsonl(cache_path, name, num_examples, media_field, cache_dir, sample_seed)
 
     return loader
+
+
+def _run_prepare(
+    mod: Any,
+    out_dir: Path,
+    save_args: Sequence[Any],
+    save_kwargs: Dict[str, Any],
+    argparse_main: bool,
+    archive_url: Optional[str],
+    archive_sha256: Optional[str],
+) -> None:
+    """Run a vendored prepare script with its output redirected to ``out_dir``.
+
+    Every vendored script derives its output dir from its own ``__file__``, and
+    some also stage a download there (mmlu writes a 166 MB ``data.tar``), so
+    unredirected they write into the installed package -- a path shared by every
+    process on the machine. Point ``__file__`` at the caller's staging dir for
+    the call, the same way the archive path hijacks ``URL`` below. Inputs
+    resolved from ``__file__`` at import time (mmlu_pro's ``SUBSETS_DIR``) bind
+    before this runs and keep pointing at the real package. The redirect is
+    module state, so it assumes one prepare per dataset per process -- true of a
+    run, which loads its dataset once; separate processes stage independently.
+    """
+    original_file = mod.__file__
+    mod.__file__ = str(out_dir / "prepare.py")
+    try:
+        if archive_url:
+            _save_data_from_verified_archive(
+                mod, save_args, save_kwargs, archive_url, archive_sha256, out_dir
+            )
+        elif argparse_main:
+            mod.main(argparse.Namespace(split=save_args[0], **save_kwargs))
+        else:
+            mod.save_data(*save_args, **save_kwargs)
+    finally:
+        mod.__file__ = original_file
 
 
 def _save_data_from_verified_archive(
@@ -206,7 +245,7 @@ def _save_data_from_verified_archive(
     save_kwargs: Dict[str, Any],
     archive_url: str,
     archive_sha256: str,
-    cache_dir: Path,
+    work_dir: Path,
 ) -> None:
     """Run a vendored prepare transform against a verified local archive."""
     if not hasattr(mod, "URL"):
@@ -215,7 +254,7 @@ def _save_data_from_verified_archive(
     archive_path = _download_verified_archive(
         archive_url,
         expected_sha256=archive_sha256,
-        directory=cache_dir,
+        directory=work_dir,
     )
     try:
         try:
@@ -270,9 +309,15 @@ def _download_verified_archive(
             temp_path.unlink(missing_ok=True)
 
 
-def _move_tree(src: Path, dst: Path) -> None:
+def _swap_tree(src: Path, dst: Path, trash_dir: Path) -> None:
+    """Replace ``dst`` with ``src`` without tearing it down first.
+
+    ``os.replace`` cannot swap a non-empty directory, so an existing tree is
+    renamed aside and deleted with the staging dir instead of being removed in
+    place -- a reader of the old tree keeps a valid path for the whole call.
+    """
     if not src.is_dir():
         raise FileNotFoundError(f"prepare.py produced no media dir at {src}")
     if dst.exists():
-        shutil.rmtree(dst)
-    shutil.move(str(src), str(dst))
+        os.rename(dst, trash_dir / f".replaced-{dst.name}")
+    os.rename(src, dst)

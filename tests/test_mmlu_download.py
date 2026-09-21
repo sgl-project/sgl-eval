@@ -33,7 +33,11 @@ def _fake_prepare_module(tmp_path: Path, expected_archive: bytes):
         archive_path = Path(urllib.request.url2pathname(parsed.path))
         assert archive_path.read_bytes() == expected_archive
         row = {"id": "m1", "problem": "Question", "expected_answer": "A"}
-        (vendored_dir / f"{split}.jsonl").write_text(json.dumps(row) + "\n")
+        # Real prepare scripts write beside their own __file__, which the loader
+        # redirects to a staging dir; a fake that closes over its build dir
+        # would not exercise that.
+        out_dir = Path(mod.__file__).absolute().parent
+        (out_dir / f"{split}.jsonl").write_text(json.dumps(row) + "\n")
 
     mod.save_data = save_data
     return mod, consumed_urls
