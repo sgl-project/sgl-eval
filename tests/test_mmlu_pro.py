@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import types
+from pathlib import Path
 
 from sgl_eval.evals import _loader
 from sgl_eval.evals._prompts import render_prompt, resolve_prompt
@@ -34,7 +35,10 @@ def _fake_prepare_module(tmp_path, rows=3):
     calls = {}
 
     def _write():
-        with (tmp_path / "test.jsonl").open("w") as f:
+        # The loader redirects __file__ to a staging dir for the call; a fake
+        # that closed over tmp_path would not follow it.
+        out_dir = Path(mod.__file__).absolute().parent
+        with (out_dir / "test.jsonl").open("w") as f:
             for i in range(rows):
                 f.write(json.dumps({"problem": f"q{i}", "expected_answer": "A"}) + "\n")
 
