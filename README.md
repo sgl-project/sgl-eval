@@ -98,6 +98,33 @@ This sets the served model and its recommended generation parameters, but not
 the deployment-specific `--base-url`. See [`preset.md`](preset.md#built-in-model-presets)
 for the supported model list, resolved values, and override priority.
 
+### Observe generations while they are running
+
+Add `--stream` to `sgl-eval run` to receive streaming completions and immediately
+flush partial output under `<run-dir>/streams/`:
+
+```bash
+sgl-eval run aime26 --base-url http://localhost:8000/v1 --n-repeats 16 --stream
+```
+
+Each request attempt gets a unique filename prefix and three files:
+
+- `*.reasoning.txt`: reasoning deltas, readable with `tail -f`.
+- `*.content.txt`: answer deltas, readable with `tail -f`.
+- `*.jsonl`: timestamped start/delta/complete/error events. The start event records
+  `sample.example_id`, zero-based `sample.repeat`, and the attempt number.
+
+Concurrent requests never share an output file. Retries retain the failed
+attempt's partial text separately. A disconnected stream or one without a final
+finish reason is an error, never a successfully graded partial answer. Completed
+responses still use the existing answer extraction and grading; reasoning is not
+concatenated into the answer. Usage comes from the server's final usage chunk;
+missing usage remains unknown rather than being estimated from chunks.
+
+This is an observation option, not an automatic repetition detector or a new
+stopping rule. Sampling parameters and output limits are unchanged. A streaming
+capable OpenAI-compatible endpoint is required; request errors remain visible.
+
 ---
 
 ## Architecture
