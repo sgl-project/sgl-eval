@@ -188,11 +188,8 @@ def load_via_prepare(
                     archive_url,
                     archive_sha256,
                 )
-                # Created only once prepare succeeded, so a failed run leaves no
-                # dataset dir behind for the next one to mistake for a cache.
                 cache_dir.mkdir(parents=True, exist_ok=True)
-                # Media first: the JSONL is what marks the cache ready, so
-                # committing it last never exposes rows whose media is missing.
+                # The JSONL marks the cache ready, so it commits last.
                 if media_dir:
                     _swap_tree(staging / media_dir, cache_dir / media_dir, staging)
                 os.replace(staging / output_basename, cache_path)
@@ -214,15 +211,11 @@ def _run_prepare(
 ) -> None:
     """Run a vendored prepare script with its output redirected to ``out_dir``.
 
-    Every vendored script derives its output dir from its own ``__file__``, and
-    some also stage a download there (mmlu writes a 166 MB ``data.tar``), so
-    unredirected they write into the installed package -- a path shared by every
-    process on the machine. Point ``__file__`` at the caller's staging dir for
-    the call, the same way the archive path hijacks ``URL`` below. Inputs
-    resolved from ``__file__`` at import time (mmlu_pro's ``SUBSETS_DIR``) bind
-    before this runs and keep pointing at the real package. The redirect is
-    module state, so it assumes one prepare per dataset per process -- true of a
-    run, which loads its dataset once; separate processes stage independently.
+    Every script derives its output dir from its own ``__file__``, so
+    unredirected they write into the installed package -- one path shared by
+    every process on the machine. Hijacking ``__file__`` is how ``URL`` is
+    redirected below. Inputs bound at import time (mmlu_pro's ``SUBSETS_DIR``)
+    still resolve against the real package.
     """
     original_file = mod.__file__
     mod.__file__ = str(out_dir / "prepare.py")
@@ -310,12 +303,9 @@ def _download_verified_archive(
 
 
 def _swap_tree(src: Path, dst: Path, trash_dir: Path) -> None:
-    """Replace ``dst`` with ``src`` without tearing it down first.
-
-    ``os.replace`` cannot swap a non-empty directory, so an existing tree is
-    renamed aside and deleted with the staging dir instead of being removed in
-    place -- a reader of the old tree keeps a valid path for the whole call.
-    """
+    """Replace ``dst`` with ``src``. ``os.replace`` cannot swap a non-empty
+    directory, so an existing tree is renamed aside rather than deleted in
+    place, leaving a reader of it a valid path for the whole call."""
     if not src.is_dir():
         raise FileNotFoundError(f"prepare.py produced no media dir at {src}")
     if dst.exists():
