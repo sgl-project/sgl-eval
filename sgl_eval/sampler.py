@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import resource
@@ -49,8 +49,8 @@ def _raise_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
 class _LargeHttpxClient(httpx.Client):
     """Allow the four-hour read timeout used by NeMo-Skills InferenceConfig."""
 
-    def __init__(self) -> None:
-        timeout = httpx.Timeout(14400, connect=30)
+    def __init__(self, request_timeout: float = 14400) -> None:
+        timeout = httpx.Timeout(request_timeout, connect=30)
         limits = httpx.Limits(
             max_keepalive_connections=_MAX_CONNECTIONS, max_connections=_MAX_CONNECTIONS
         )
@@ -66,15 +66,40 @@ class ChatCompletionSampler:
         model: Optional[str] = None,
         api_key: str = "EMPTY",
         max_retries: int = 6,
+        *,
+        request_timeout: float = 14400,
+        sdk_max_retries: Optional[int] = None,
     ) -> None:
         _raise_nofile_soft_limit()
+        self._base_url = base_url
+        self._api_key = api_key
         # Hold the httpx client directly so ``abort()`` can close it without
         # reaching into ``OpenAI``'s private ``_client`` attribute.
-        self._http = _LargeHttpxClient()
-        self.client = OpenAI(base_url=base_url, api_key=api_key, http_client=self._http)
+        self._http = _LargeHttpxClient(request_timeout)
+        client_kwargs: Dict[str, Any] = {}
+        if sdk_max_retries is not None:
+            client_kwargs["max_retries"] = sdk_max_retries
+        self.client = OpenAI(
+            base_url=base_url, api_key=api_key, http_client=self._http, **client_kwargs
+        )
         self.model = model or self._resolve_default_model()
         self.max_retries = max_retries
         self._abort_event = threading.Event()
+
+    def derive(self, *, request_timeout: float, sdk_max_retries: int) -> "ChatCompletionSampler":
+        """A sampler for the same endpoint and model with its own HTTP client.
+
+        ``abort()`` on the derived sampler closes only its own connections, so
+        one agent trial can be stopped without touching the others.
+        """
+        return ChatCompletionSampler(
+            base_url=self._base_url,
+            model=self.model,
+            api_key=self._api_key,
+            max_retries=self.max_retries,
+            request_timeout=request_timeout,
+            sdk_max_retries=sdk_max_retries,
+        )
 
     @property
     def aborted(self) -> bool:
@@ -89,10 +114,119 @@ class ChatCompletionSampler:
         ``WorkerAborted``. Idempotent.
         """
         self._abort_event.set()
+        self.close()
+
+    def close(self) -> None:
+        """Release the HTTP connections without flagging an abort."""
         try:
             self._http.close()
         except Exception:
             pass
+
+    def complete_raw(
+        self,
+        messages: MessageList,
+        gen: GenConfig,
+        *,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Any] = None,
+        stream: bool = False,
+    ) -> Any:
+        """One chat completion returned as the SDK object; every failure raises.
+
+        Agent loops need the full message (``tool_calls``, ``reasoning_content``)
+        and must see transport errors as errors, so unlike ``__call__`` there
+        is no retry here and no empty-``Sample`` fallback.
+
+        With ``stream=True`` the completion is streamed and reassembled into the
+        same ``ChatCompletion`` shape. Closing an httpx client does not wake a
+        thread blocked in a socket read, so this is what makes ``abort()`` take
+        effect mid-generation: the stream is checked between chunks and closed,
+        which also lets the server drop the request.
+        """
+        if self._abort_event.is_set():
+            raise WorkerAborted()
+        if gen.system_message:
+            messages = [self.pack_message("system", gen.system_message), *messages]
+        kwargs = self._build_kwargs(messages, gen)
+        if tools is not None:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
+        if not stream:
+            return self.client.chat.completions.create(**kwargs)
+        return self._stream_completion(kwargs)
+
+    def _stream_completion(self, kwargs: Dict[str, Any]) -> Any:
+        from openai.types.chat import ChatCompletion
+
+        response = self.client.chat.completions.create(
+            stream=True, stream_options={"include_usage": True}, **kwargs
+        )
+        content: List[str] = []
+        reasoning: List[str] = []
+        tool_calls: Dict[int, Dict[str, Any]] = {}
+        finish_reason: Optional[str] = None
+        usage: Optional[Dict[str, Any]] = None
+        head: Dict[str, Any] = {}
+        try:
+            for chunk in response:
+                if self._abort_event.is_set():
+                    raise WorkerAborted()
+                if not head and chunk.id:
+                    head = {"id": chunk.id, "created": chunk.created, "model": chunk.model}
+                if chunk.usage is not None:
+                    usage = chunk.usage.model_dump()
+                for choice in chunk.choices:
+                    if choice.index != 0:
+                        continue
+                    delta = choice.delta
+                    if delta.content:
+                        content.append(delta.content)
+                    # sglang / DeepSeek-style endpoints stream the thinking separately.
+                    reasoning_delta = getattr(delta, "reasoning_content", None)
+                    if reasoning_delta:
+                        reasoning.append(reasoning_delta)
+                    for call in delta.tool_calls or []:
+                        slot = tool_calls.setdefault(
+                            call.index,
+                            {
+                                "id": None,
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            },
+                        )
+                        if call.id:
+                            slot["id"] = call.id
+                        if call.function is not None:
+                            if call.function.name:
+                                slot["function"]["name"] = call.function.name
+                            if call.function.arguments:
+                                slot["function"]["arguments"] += call.function.arguments
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+        finally:
+            response.close()
+
+        message: Dict[str, Any] = {
+            "role": "assistant",
+            "content": "".join(content) or None,
+            "tool_calls": [tool_calls[index] for index in sorted(tool_calls)] or None,
+        }
+        if reasoning:
+            message["reasoning_content"] = "".join(reasoning)
+        return ChatCompletion.model_validate(
+            {
+                "id": head.get("id") or "",
+                "object": "chat.completion",
+                "created": head.get("created") or 0,
+                "model": head.get("model") or self.model,
+                "choices": [
+                    {"index": 0, "finish_reason": finish_reason or "stop", "message": message}
+                ],
+                "usage": usage,
+            }
+        )
 
     def _resolve_default_model(self) -> str:
         models = self.client.models.list().data

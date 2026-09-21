@@ -1,0 +1,304 @@
+# Manifest for the Harbor-compatible trial runtime vendored from datacurve-ai/pier.
+#
+# Edit this file then run `python scripts/sync_vendored.py pier` to refresh the
+# vendored sources. Banner comments at the top of each generated file point
+# back here. `python scripts/sync_vendored.py --check` verifies the tree is a
+# fresh sync of this manifest.
+#
+# What is vendored: the trial state machine (Trial / TrialQueue /
+# TrialExecution), the verifier and reward parsing, artifact collection, the
+# Docker (compose) environment, the oracle agent, the task / trial / result
+# models and the Mean metric. The set is the static import closure of those
+# entry modules; nothing under cli/, analyze/, critique/, viewer/, job.py or
+# the installed CLI agents is included.
+#
+# License: Apache-2.0 (LICENSE); NOTICE records that pier derives from Harbor.
+
+upstream_repo: datacurve-ai/pier
+upstream_package: pier
+upstream_branch: main
+# v0.3.1. Same commit as the DeepSWE reference runs this benchmark is
+# calibrated against.
+synced_from_sha: 0c802fc067a425345b24d1c69411aa98acf61a1d
+synced_at: "2026-09-12"
+
+# pip deps that vendored files actually `import`. Reflected in pyproject.toml.
+# Upstream also depends on litellm, modal, daytona, harbor, fastapi, rich,
+# typer, loguru, anthropic, claude-agent-sdk, mcp and uvicorn; none of those
+# are imported by the vendored subset.
+pinned_deps:
+  pydantic: ">=2"               # every model module
+  tenacity: ""                  # trial/trial.py, trial/execution.py
+  jinja2: ""                    # utils/templating.py
+  toml: ""                      # models/task/config.py (`toml.dumps` in to_toml)
+  shortuuid: ""                 # models/task/id.py, models/trial/config.py
+  dirhash: ""                   # models/task/task.py (lazy, Task.checksum)
+  typing_extensions: ""         # NotRequired / TypedDict on Python 3.10 (see compat below)
+  tomli: 'python_version < "3.11"'  # tomllib fallback (see compat below)
+
+# Every directory holding vendored files gets an `__init__.py` marker so
+# setuptools' package discovery ships it (upstream is a namespace layout).
+ensure_package_inits: true
+
+# Textual rewrites so vendored files resolve under sgl_eval._vendored.pier.
+# The quoted form covers the lazy-import registry in environments/factory.py
+# without re-matching text the unquoted rule already rewrote.
+import_rewrites:
+  "from pier import": "from sgl_eval._vendored.pier import"
+  "from pier.": "from sgl_eval._vendored.pier."
+  "import pier.": "import sgl_eval._vendored.pier."
+  '"pier.environments.': '"sgl_eval._vendored.pier.environments.'
+
+# Compatibility transforms (upstream requires Python >= 3.12; sgl-eval keeps
+# 3.10). Verified against a 3.10 interpreter: these are the only sites.
+#   - six multi-line f-string expressions (PEP 701) expanded onto one line
+#   - `import tomllib` gains a `tomli` fallback
+#   - `NotRequired` / `TypedDict` come from typing_extensions (pydantic rejects
+#     typing.TypedDict below 3.12): models/trial/config.py, models/agent/rollout_detail.py
+# Behavior transforms:
+#   - package __init__ no longer reads distribution metadata (pier is not
+#     installed as a distribution here)
+#   - agents/factory.py drops the eager imports of the installed CLI agents;
+#     only Oracle, Nop and the custom `import_path` route remain
+
+files:
+  - src: src/pier/__init__.py
+    dst: __init__.py
+    drop_statements:
+      - text: |
+          import importlib.metadata
+    replace:
+      - old: |
+          __version__ = importlib.metadata.version(PYPI_PACKAGE_NAME)
+        new: |
+          __version__ = "0.3.1"  # pinned upstream release; the pier distribution is not installed
+  - src: src/pier/constants.py
+    dst: constants.py
+
+  # --- agents ---
+  - src: src/pier/agents/base.py
+    dst: agents/base.py
+  - src: src/pier/agents/nop.py
+    dst: agents/nop.py
+  - src: src/pier/agents/oracle.py
+    dst: agents/oracle.py
+  - src: src/pier/agents/installed/base.py
+    dst: agents/installed/base.py
+  - src: src/pier/agents/factory.py
+    dst: agents/factory.py
+    drop_statements:
+      - text: |
+          from pier.agents.installed.antigravity_sdk import AntigravitySDK
+          from pier.agents.installed.claude_code import ClaudeCode
+          from pier.agents.installed.codex import Codex
+          from pier.agents.installed.cursor_cli import CursorCli
+          from pier.agents.installed.gemini_cli import GeminiCli
+          from pier.agents.installed.mini_swe_agent import MiniSweAgent
+          from pier.agents.installed.opencode import OpenCode
+    replace:
+      - old: |
+          _AGENTS: list[type[BaseAgent]] = [
+              NopAgent,
+              OracleAgent,
+              AntigravitySDK,
+              ClaudeCode,
+              Codex,
+              CursorCli,
+              GeminiCli,
+              MiniSweAgent,
+              OpenCode,
+          ]
+        new: |
+          _AGENTS: list[type[BaseAgent]] = [
+              NopAgent,
+              OracleAgent,
+          ]
+      - old: |
+          f"Agent name {config.name} is not valid. Valid agent names: {
+              AgentName.values()
+          }"
+        new: |
+          f"Agent name {config.name} is not valid. Valid agent names: {AgentName.values()}"
+
+  # --- environments ---
+  - src: src/pier/environments/base.py
+    dst: environments/base.py
+  - src: src/pier/environments/capabilities.py
+    dst: environments/capabilities.py
+  - src: src/pier/environments/resource_policies.py
+    dst: environments/resource_policies.py
+  - src: src/pier/environments/agent_setup.py
+    dst: environments/agent_setup.py
+  - src: src/pier/environments/factory.py
+    dst: environments/factory.py
+  - src: src/pier/environments/docker/__init__.py
+    dst: environments/docker/__init__.py
+  - src: src/pier/environments/docker/docker.py
+    dst: environments/docker/docker.py
+  - src: src/pier/environments/docker/docker_unix.py
+    dst: environments/docker/docker_unix.py
+  - src: src/pier/environments/docker/docker_windows.py
+    dst: environments/docker/docker_windows.py
+  - src: src/pier/environments/docker/docker-compose-base.yaml
+    dst: environments/docker/docker-compose-base.yaml
+  - src: src/pier/environments/docker/docker-compose-build.yaml
+    dst: environments/docker/docker-compose-build.yaml
+  - src: src/pier/environments/docker/docker-compose-no-network.yaml
+    dst: environments/docker/docker-compose-no-network.yaml
+  - src: src/pier/environments/docker/docker-compose-prebuilt.yaml
+    dst: environments/docker/docker-compose-prebuilt.yaml
+  - src: src/pier/environments/docker/docker-compose-windows-keepalive.yaml
+    dst: environments/docker/docker-compose-windows-keepalive.yaml
+
+  # --- metrics ---
+  - src: src/pier/metrics/base.py
+    dst: metrics/base.py
+  - src: src/pier/metrics/factory.py
+    dst: metrics/factory.py
+  - src: src/pier/metrics/max.py
+    dst: metrics/max.py
+  - src: src/pier/metrics/mean.py
+    dst: metrics/mean.py
+  - src: src/pier/metrics/min.py
+    dst: metrics/min.py
+  - src: src/pier/metrics/sum.py
+    dst: metrics/sum.py
+
+  # --- models ---
+  - src: src/pier/models/agent/context.py
+    dst: models/agent/context.py
+  - src: src/pier/models/agent/install.py
+    dst: models/agent/install.py
+  - src: src/pier/models/agent/name.py
+    dst: models/agent/name.py
+  - src: src/pier/models/agent/network.py
+    dst: models/agent/network.py
+  - src: src/pier/models/agent/rollout_detail.py
+    dst: models/agent/rollout_detail.py
+    replace:
+      - old: |
+          from typing import Any, TypedDict
+        new: |
+          from typing import Any
+
+          from typing_extensions import TypedDict
+  - src: src/pier/models/environment_type.py
+    dst: models/environment_type.py
+  - src: src/pier/models/job/config.py
+    dst: models/job/config.py
+  - src: src/pier/models/job/result.py
+    dst: models/job/result.py
+  - src: src/pier/models/metric/config.py
+    dst: models/metric/config.py
+  - src: src/pier/models/metric/type.py
+    dst: models/metric/type.py
+  - src: src/pier/models/task/config.py
+    dst: models/task/config.py
+    replace:
+      - old: |
+          import tomllib
+        new: |
+          try:
+              import tomllib
+          except ModuleNotFoundError:  # Python < 3.11
+              import tomli as tomllib
+  - src: src/pier/models/task/id.py
+    dst: models/task/id.py
+  - src: src/pier/models/task/paths.py
+    dst: models/task/paths.py
+    replace:
+      - old: |
+          import tomllib
+        new: |
+          try:
+              import tomllib
+          except ModuleNotFoundError:  # Python < 3.11
+              import tomli as tomllib
+  - src: src/pier/models/task/task.py
+    dst: models/task/task.py
+  - src: src/pier/models/task/verifier_mode.py
+    dst: models/task/verifier_mode.py
+  - src: src/pier/models/trial/artifact_manifest.py
+    dst: models/trial/artifact_manifest.py
+  - src: src/pier/models/trial/config.py
+    dst: models/trial/config.py
+    replace:
+      - old: |
+          from typing import Any, Literal, NotRequired, TypedDict
+        new: |
+          from typing import Any, Literal
+
+          from typing_extensions import NotRequired, TypedDict
+  - src: src/pier/models/trial/paths.py
+    dst: models/trial/paths.py
+  - src: src/pier/models/trial/result.py
+    dst: models/trial/result.py
+  - src: src/pier/models/verifier/result.py
+    dst: models/verifier/result.py
+
+  # --- trial runtime ---
+  - src: src/pier/trial/artifact_handler.py
+    dst: trial/artifact_handler.py
+  - src: src/pier/trial/execution.py
+    dst: trial/execution.py
+    replace:
+      - old: |
+          f"Environment start timed out after {
+              self.environment_build_timeout_sec
+          } seconds"
+        new: |
+          f"Environment start timed out after {self.environment_build_timeout_sec} seconds"
+  - src: src/pier/trial/hooks.py
+    dst: trial/hooks.py
+  - src: src/pier/trial/queue.py
+    dst: trial/queue.py
+  - src: src/pier/trial/trial.py
+    dst: trial/trial.py
+    replace:
+      - old: |
+          f"Verifier execution timed out after {
+              self._verifier_timeout_sec
+          } seconds"
+        new: |
+          f"Verifier execution timed out after {self._verifier_timeout_sec} seconds"
+
+  # --- verifier ---
+  - src: src/pier/verifier/verifier.py
+    dst: verifier/verifier.py
+    replace:
+      - old: |
+          f"Failed to parse rewards from text file {
+              self._trial_paths.reward_text_path
+          }"
+        new: |
+          f"Failed to parse rewards from text file {self._trial_paths.reward_text_path}"
+      - old: |
+          f"Failed to parse rewards from JSON file {
+              self._trial_paths.reward_json_path
+          }"
+        new: |
+          f"Failed to parse rewards from JSON file {self._trial_paths.reward_json_path}"
+      - old: |
+          f"No reward file found at {self._trial_paths.reward_text_path} or {
+              self._trial_paths.reward_json_path
+          }"
+        new: |
+          f"No reward file found at {self._trial_paths.reward_text_path} or {self._trial_paths.reward_json_path}"
+
+  # --- utils ---
+  - src: src/pier/utils/env.py
+    dst: utils/env.py
+  - src: src/pier/utils/logger.py
+    dst: utils/logger.py
+  - src: src/pier/utils/scripts.py
+    dst: utils/scripts.py
+  - src: src/pier/utils/templating.py
+    dst: utils/templating.py
+
+  # --- license ---
+  - src: LICENSE
+    dst: LICENSE
+    binary: true
+  - src: NOTICE
+    dst: NOTICE
+    binary: true

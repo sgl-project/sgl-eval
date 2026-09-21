@@ -34,6 +34,10 @@ def dump_run(
         "token_usage": _token_usage(result),
         "aggregate": result.aggregate,
     }
+    if result.response_usage:
+        payload["response_usage"] = result.response_usage
+    if result.metadata:
+        payload["metadata"] = result.metadata
     if run_meta:
         # Reject overlap with core fields so a future caller can't silently
         # clobber ``aggregate`` / ``name`` / etc. by reusing those keys.
@@ -61,8 +65,13 @@ def format_summary(result: RunResult) -> str:
     )
 
     rows = _build_rows(agg, k)
+    for label, value in result.metadata.get("summary_rows", []):
+        rows.append((False, str(label), str(value), None))
     token_usage = _token_usage(result)
     num_samples = sum(len(r.samples) for r in result.per_example)
+    # A trajectory benchmark's sample is a whole trial, so its totals are per
+    # trial; the per-response means come from ``response_usage``.
+    per_sample_suffix = "/trial" if result.response_usage else ""
     for field, label in (
         ("prompt_tokens", "avg_input_tokens"),
         ("completion_tokens", "avg_output_tokens"),
@@ -75,7 +84,19 @@ def format_summary(result: RunResult) -> str:
         note = (
             f"usage reported for {count}/{num_samples} samples" if 0 < count < num_samples else None
         )
-        rows.append((False, label, value, note))
+        rows.append((False, label + per_sample_suffix, value, note))
+    if result.response_usage:
+        usage = result.response_usage
+        reported, total = usage.get("usage_reported", 0), usage.get("n_responses", 0)
+        note = f"usage reported for {reported}/{total} responses" if reported < total else None
+        for key, label in (
+            ("mean_prompt_tokens", "avg_input_tokens/response"),
+            ("mean_completion_tokens", "avg_output_tokens/response"),
+            ("mean_reasoning_tokens", "avg_thinking_tokens/response"),
+        ):
+            mean = usage.get(key)
+            value = f"{mean:,.1f} tokens" if mean is not None else "N/A"
+            rows.append((False, label, value, note))
     label_w = max(len(label) for _, label, _, _ in rows) if rows else 0
 
     lines = [f"== {result.name} ==", meta, ""]
