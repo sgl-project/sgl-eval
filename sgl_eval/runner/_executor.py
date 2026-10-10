@@ -6,6 +6,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional, Tuple
 
+from sgl_eval.streaming import sample_identity
 from sgl_eval.types import Example, ExampleResult, Sample
 
 # Duplicated from public ``__init__`` to avoid an import cycle. Keep in sync.
@@ -40,16 +41,23 @@ def _run_sample_score_phase(
             on_sample_scored(ex, rep, sample, score, extracted)
         tick(rep, score, sample.finish_reason)
 
+    def sample_with_identity(ex: Example, rep: int) -> Sample:
+        token = sample_identity.set({"example_id": ex.id, "repeat": rep})
+        try:
+            return sample_fn(ex, rep)
+        finally:
+            sample_identity.reset(token)
+
     if workers == 1:
         for ex, rep in tasks:
             try:
-                sample = sample_fn(ex, rep)
+                sample = sample_with_identity(ex, rep)
             except WorkerAborted:
                 return
             record(ex, rep, sample)
         return
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(sample_fn, ex, rep): (ex.id, rep) for ex, rep in tasks}
+        futures = {pool.submit(sample_with_identity, ex, rep): (ex.id, rep) for ex, rep in tasks}
         for fut in as_completed(futures):
             ex_id, rep = futures[fut]
             try:
