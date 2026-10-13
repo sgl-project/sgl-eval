@@ -29,6 +29,20 @@ sgl-eval run aime25 \
   --load-preset-from-model-id deepseek-ai/DeepSeek-V4-Flash-0731
 ```
 
+### DeepSeek V4.1 Flash
+
+`deepseek-ai/DeepSeek-V4.1-Flash` uses temperature `1.0`, top-p `0.95`,
+thinking enabled, and reasoning effort `high`. It does not set `max_tokens`;
+the benchmark default applies (MMMU-Pro leaves the output limit to the server).
+For a bounded evaluation budget, pass `--max-tokens` explicitly.
+
+```bash
+sgl-eval run mmmu_pro \
+  --base-url http://localhost:30000/v1 \
+  --load-preset-from-model-id deepseek-ai/DeepSeek-V4.1-Flash \
+  --num-examples 200 --max-tokens 32768
+```
+
 Built-in model presets deliberately do not contain `base_url`; pass it on the
 CLI or provide it through a user preset. An unknown model ID exits before
 contacting the endpoint, prints the complete supported-ID list, and tells the

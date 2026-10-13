@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from sgl_eval.model_preset import ModelPreset
+from sgl_eval.model_preset import ModelPreset, load_model_preset
 from sgl_eval.preset import (
     Endpoint,
     Expected,
@@ -277,3 +277,22 @@ def test_reasoning_effort_validated_at_parse_time(raw, expected) -> None:
             reasoning_effort(raw)
     else:
         assert reasoning_effort(raw) == expected
+
+
+def test_dsv41_flash_model_preset() -> None:
+    preset = load_model_preset("deepseek-ai/DeepSeek-V4.1-Flash")
+    assert preset.model == "deepseek-ai/DeepSeek-V4.1-Flash"
+    gen = apply_to_gen(GenConfig(), None, _args(), preset)
+    assert gen.temperature == 1.0
+    assert gen.top_p == 0.95
+    assert gen.chat_template_kwargs == {"thinking": True}
+    assert gen.reasoning_effort == "high"
+    assert gen.max_tokens is None
+    assert gen.seed is None
+
+    overridden = apply_to_gen(
+        GenConfig(), None, _args(max_tokens=4096, thinking=False, reasoning_effort="low"), preset
+    )
+    assert overridden.max_tokens == 4096
+    assert overridden.chat_template_kwargs == {"thinking": False}
+    assert overridden.reasoning_effort == "low"
