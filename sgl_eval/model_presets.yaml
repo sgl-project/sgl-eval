@@ -16,6 +16,13 @@ models:
       max_tokens: 400000
       thinking: true
       reasoning_effort: max
+  deepseek-ai/DeepSeek-V4.1-Flash:
+    model: deepseek-ai/DeepSeek-V4.1-Flash
+    sampling:
+      temperature: 1.0
+      top_p: 0.95
+      thinking: true
+      reasoning_effort: high
   moonshotai/Kimi-K3:
     model: moonshotai/Kimi-K3
     sampling:
