@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import socket
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import resource
@@ -27,6 +28,44 @@ LOG = logging.getLogger(__name__)
 _MAX_CONNECTIONS = 3600
 _TARGET_NOFILE = 65_535
 
+# A non-streaming request receives nothing until generation ends, so a client
+# path that dies while waiting for the response (Wi-Fi drop, IP change, NAT
+# reset) is otherwise only noticed at the four-hour read timeout. Keepalive
+# probes fail such a socket after about idle + interval * count seconds and the
+# request goes through the retry loop. They do not cover a stalled upload,
+# which TCP retransmission and the write timeout still govern.
+_KEEPALIVE_IDLE_S = 60
+_KEEPALIVE_INTERVAL_S = 15
+_KEEPALIVE_COUNT = 4
+
+
+def _keepalive_socket_options() -> List[Tuple[int, int, int]]:
+    """TCP keepalive options the local socket stack accepts.
+
+    httpcore turns a failed setsockopt into a ConnectError on every connection,
+    so options the OS names but rejects are dropped up front.
+    """
+    # Linux and Windows name the idle option TCP_KEEPIDLE; macOS names it TCP_KEEPALIVE.
+    idle = getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None)
+    candidates = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+    for name, value in (
+        (idle, _KEEPALIVE_IDLE_S),
+        (getattr(socket, "TCP_KEEPINTVL", None), _KEEPALIVE_INTERVAL_S),
+        (getattr(socket, "TCP_KEEPCNT", None), _KEEPALIVE_COUNT),
+    ):
+        if name is not None:
+            candidates.append((socket.IPPROTO_TCP, name, value))
+    accepted = []
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        for option in candidates:
+            try:
+                probe.setsockopt(*option)
+            except OSError as exc:
+                LOG.warning("TCP keepalive option %s not supported, skipping: %s", option, exc)
+            else:
+                accepted.append(option)
+    return accepted
+
 
 def _raise_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
     """Leave room for concurrent HTTP sockets and asyncio selectors."""
@@ -47,14 +86,32 @@ def _raise_nofile_soft_limit(target: int = _TARGET_NOFILE) -> None:
 
 
 class _LargeHttpxClient(httpx.Client):
-    """Allow the four-hour read timeout used by NeMo-Skills InferenceConfig."""
+    """Allow the four-hour read timeout used by NeMo-Skills InferenceConfig.
+
+    Every connection, direct or through an environment proxy, also gets TCP
+    keepalive. httpx builds both kinds through the two hooks below and passes
+    their arguments by keyword, so they forward everything to HTTPTransport and
+    add only ``socket_options``; passing ``transport=`` instead would turn off
+    the environment proxies.
+    """
 
     def __init__(self) -> None:
+        self._socket_options = _keepalive_socket_options()
         timeout = httpx.Timeout(14400, connect=30)
         limits = httpx.Limits(
             max_keepalive_connections=_MAX_CONNECTIONS, max_connections=_MAX_CONNECTIONS
         )
         super().__init__(timeout=timeout, limits=limits)
+
+    def _init_transport(self, **kwargs: Any) -> httpx.BaseTransport:
+        if kwargs.get("transport") is not None or kwargs.get("app") is not None:
+            return super()._init_transport(**kwargs)
+        kwargs.pop("transport", None)
+        kwargs.pop("app", None)
+        return httpx.HTTPTransport(socket_options=self._socket_options, **kwargs)
+
+    def _init_proxy_transport(self, proxy: Any, **kwargs: Any) -> httpx.BaseTransport:
+        return httpx.HTTPTransport(proxy=proxy, socket_options=self._socket_options, **kwargs)
 
 
 class ChatCompletionSampler:

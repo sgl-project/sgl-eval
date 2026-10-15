@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import http.server
 import logging
+import socket
 import threading
 from types import SimpleNamespace
 
@@ -225,3 +227,105 @@ def test_bad_request_returns_empty_sample(sampler):
     out = sampler([{"role": "user", "content": "hi"}])
     assert out.text == ""
     assert out.finish_reason == "error"
+
+
+_PROXY_ENV = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+
+
+def _clear_proxy_env(monkeypatch):
+    for name in _PROXY_ENV:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+
+
+@pytest.fixture
+def local_http_server():
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"{}"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/"
+    server.shutdown()
+    server.server_close()
+
+
+def test_sampler_connections_enable_tcp_keepalive(monkeypatch, local_http_server):
+    _clear_proxy_env(monkeypatch)
+    expected = {
+        getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None): 60,
+        getattr(socket, "TCP_KEEPINTVL", None): 15,
+        getattr(socket, "TCP_KEEPCNT", None): 4,
+    }
+    expected.pop(None, None)
+
+    client = sampler_module._LargeHttpxClient()
+    try:
+        with client.stream("GET", local_http_server) as response:
+            sock = response.extensions["network_stream"].get_extra_info("socket")
+            assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) != 0
+            for name, value in expected.items():
+                assert sock.getsockopt(socket.IPPROTO_TCP, name) == value
+    finally:
+        client.close()
+
+
+def test_env_proxy_transport_also_gets_keepalive_and_limits(monkeypatch):
+    _clear_proxy_env(monkeypatch)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
+    built = []
+    real_transport = sampler_module.httpx.HTTPTransport
+
+    def spy(**kwargs):
+        built.append(kwargs)
+        return real_transport(**kwargs)
+
+    monkeypatch.setattr(sampler_module.httpx, "HTTPTransport", spy)
+
+    client = sampler_module._LargeHttpxClient()
+    client.close()
+
+    proxied = [kw for kw in built if kw.get("proxy") is not None]
+    direct = [kw for kw in built if kw.get("proxy") is None]
+    assert len(proxied) == 1 and len(direct) == 1
+    for kwargs in built:
+        assert kwargs["socket_options"] == sampler_module._keepalive_socket_options()
+        assert kwargs["limits"].max_connections == sampler_module._MAX_CONNECTIONS
+
+
+def test_keepalive_options_rejected_by_the_os_are_dropped(monkeypatch, caplog):
+    rejected = getattr(socket, "TCP_KEEPCNT", None)
+    if rejected is None:
+        pytest.skip("TCP_KEEPCNT not exposed on this platform")
+
+    class _FakeSocket:
+        def __init__(self, *_args):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def setsockopt(self, level, name, value):
+            if name == rejected:
+                raise OSError("Protocol not available")
+
+    monkeypatch.setattr(sampler_module.socket, "socket", _FakeSocket)
+
+    with caplog.at_level(logging.WARNING):
+        options = sampler_module._keepalive_socket_options()
+
+    assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in options
+    assert all(name != rejected for _level, name, _value in options)
+    assert "not supported" in caplog.text
