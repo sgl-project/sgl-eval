@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 try:
@@ -17,6 +18,7 @@ import openai
 from openai import OpenAI
 
 from sgl_eval.runner import WorkerAborted
+from sgl_eval.streaming import read_stream
 from sgl_eval.types import GenConfig, MessageList, Sample
 
 LOG = logging.getLogger(__name__)
@@ -66,6 +68,7 @@ class ChatCompletionSampler:
         model: Optional[str] = None,
         api_key: str = "EMPTY",
         max_retries: int = 6,
+        stream_dir: Path | None = None,
     ) -> None:
         _raise_nofile_soft_limit()
         # Hold the httpx client directly so ``abort()`` can close it without
@@ -74,6 +77,9 @@ class ChatCompletionSampler:
         self.client = OpenAI(base_url=base_url, api_key=api_key, http_client=self._http)
         self.model = model or self._resolve_default_model()
         self.max_retries = max_retries
+        self.stream_dir = stream_dir
+        if stream_dir is not None:
+            stream_dir.mkdir(parents=True, exist_ok=True)
         self._abort_event = threading.Event()
 
     @property
@@ -116,7 +122,15 @@ class ChatCompletionSampler:
                 raise WorkerAborted()
             try:
                 start = time.time()
-                response = self.client.chat.completions.create(**kwargs)
+                if getattr(self, "stream_dir", None) is None:
+                    response = self.client.chat.completions.create(**kwargs)
+                else:
+
+                    def check_abort():
+                        if self.aborted:
+                            raise WorkerAborted()
+
+                    response = read_stream(self.client, kwargs, self.stream_dir, trial, check_abort)
                 end = time.time()
                 return self._to_sample(response, start=start, end=end)
             except openai.BadRequestError as e:

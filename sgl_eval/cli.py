@@ -68,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="concurrent requests (default: the benchmark's own ceiling, 64 for "
         "most, lower for long-context)",
     )
+    p_run.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream and flush per-attempt reasoning/content under the run directory; scoring is unchanged",
+    )
     p_run.add_argument("--n-repeats", type=int, default=None)
     p_run.add_argument("--max-tokens", type=int, default=None)
     p_run.add_argument("--temperature", type=float, default=None)
