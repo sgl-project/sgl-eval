@@ -5,18 +5,26 @@ OpenAI-compatible endpoint, get reproducible numbers.
 
 ## Core architectural principle
 
-**Anything that decides a score is vendored verbatim from
-[NVIDIA/NeMo-Skills](https://github.com/NVIDIA/NeMo-Skills).** sgl-eval
-contributes only transport (OpenAI client, threadpool runner, CLI) and
-the thin glue that wires upstream pieces into one command.
+**Anything that decides a score is vendored verbatim from its upstream.**
+Math and multichoice benchmarks vendor
+[NVIDIA/NeMo-Skills](https://github.com/NVIDIA/NeMo-Skills); the `deepswe`
+agentic benchmark vendors the [pier](https://github.com/datacurve-ai/pier)
+trial runtime and the [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent)
+loop. sgl-eval contributes only transport (OpenAI client, threadpool runner,
+CLI, host-side adapters) and the thin glue that wires upstream pieces into
+one command.
 
 Enforced by:
 
-- `sgl_eval/_vendored/nemo_skills/` holds the vendored slice.
-- `sgl_eval/_vendored/nemo_skills/SOURCES.yaml` pins the upstream commit
-  and records every file's source path.
+- `sgl_eval/_vendored/<pkg>/` holds each vendored slice
+  (`nemo_skills`, `pier`, `mini_swe_agent`).
+- `sgl_eval/_vendored/<pkg>/SOURCES.yaml` pins the upstream commit, records
+  every file's source path and every transform applied to it.
+- `python scripts/sync_vendored.py --check` regenerates every package from
+  its manifest and fails on any drift (CI runs it).
 - `scripts/audit_vendored.py` (run by `tests/test_vendor_audit.py`) fails
-  if any vendored file still has unrewritten `from nemo_skills.X` imports.
+  if any vendored file still has unrewritten upstream imports or imports
+  sgl-eval code.
 - NS's own `tests/test_math_equal.py` + `tests/test_base_metrics.py` are
   vendored alongside and run on every `pytest`. Drift surfaces
   immediately.
@@ -25,30 +33,30 @@ Enforced by:
 
 ```
 sgl_eval/
-├── cli.py / sampler.py / runner.py / registry.py / metrics.py / types.py
+├── cli.py / sampler.py / runner/ / registry.py / metrics.py / types.py
 │   sgl-eval's own code: transport + plumbing.
+├── pipeline/                     # run setup (run dir, resume fingerprint), report
 ├── evals/
-│   per-benchmark glue (math runner, mcq runner, registry table,
-│   prompt render, prediction dict adapter, dataset loader).
-└── _vendored/nemo_skills/        # DO NOT hand-edit.
-    ├── SOURCES.yaml              # the manifest
-    ├── math_grader.py            # extract_answer + math_equal
-    ├── _metrics_base.py          # pass@k / majority@k / std-SEM
-    ├── math_metrics.py           # MathMetrics (used by both math + mcq)
-    ├── evaluator/{base,math,mcq}.py
-    ├── dataset/<bench>/{__init__.py, prepare.py | test.txt}
-    ├── prompts/*.yaml
-    └── tests/                    # NS's own behavior tests
+│   per-benchmark glue (math runner, mcq runner, harbor runner, registry
+│   table, prompt render, prediction dict adapter, dataset loader).
+├── agents/mini_swe_agent.py      # host-side agent: transport + sandbox hooks
+├── sandbox/docker.py             # per-action exec in a pier-managed container
+└── _vendored/                    # DO NOT hand-edit.
+    ├── nemo_skills/              # math grader, metrics, evaluators, datasets, prompts
+    ├── pier/                     # Trial / TrialQueue / Verifier / DockerEnvironment / Mean
+    └── mini_swe_agent/           # DefaultAgent, LitellmModel behavior, LocalEnvironment, mini.yaml
 ```
 
 ## Editing rules
 
 - **Never hand-edit anything under `sgl_eval/_vendored/`.** To change
-  vendored content, edit `SOURCES.yaml` and run
-  `python scripts/sync_vendored.py`.
+  vendored content, edit that package's `SOURCES.yaml` and run
+  `python scripts/sync_vendored.py <pkg>`. Transforms (`replace`,
+  `drop_statements`, `drop_functions`, `drop_imports`) carry an expected
+  match count and fail loudly when upstream moves.
 - New functionality that touches scoring (grader, aggregator, prompt,
-  dataset prep) goes through vendoring. New transport / runner / CLI
-  features are SE code, fine to add directly.
+  dataset prep, trial lifecycle) goes through vendoring. New transport /
+  runner / CLI features are SE code, fine to add directly.
 - Sampling / generation defaults belong in
   `sgl_eval/evals/_registry.py:_TABLE`, not in vendored code.
 
@@ -68,8 +76,11 @@ Per-benchmark `default_n_repeats` and `thinking` are sgl-eval's choice
 ```bash
 pytest                                # ours + vendored NS corner cases
 python scripts/audit_vendored.py      # vendor import sanity
+python scripts/sync_vendored.py --check   # vendored trees match their manifests
 pre-commit run --all-files            # lint + format + codespell
 ```
+
+`deepswe` needs Docker; its acceptance is manual (`benchmarks.md`).
 
 ## Available skills
 

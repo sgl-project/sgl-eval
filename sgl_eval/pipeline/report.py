@@ -45,24 +45,28 @@ def render(result: RunResult, ctx: RunContext) -> int:
         print(f"Predictions: {ctx.run_dir}  ({ctx.inputs.n_repeats} jsonl file(s))")
 
     if stats is not None:
-        print(_format_partial_summary(result, stats), file=sys.stderr)
+        print(_format_partial_summary(result, stats, ctx), file=sys.stderr)
     else:
         print_expected_vs_actual(result, ctx.inputs.preset)
 
     # 130 even when result is complete: respect user's Ctrl-C intent.
-    return 130 if ctx.sampler.aborted else 0
+    return 130 if ctx.cancel_event.is_set() else 0
 
 
 def _build_run_meta(ctx: RunContext) -> Dict[str, Any]:
     meta: Dict[str, Any] = {
         "timestamp": ctx.stamp,
-        "model": ctx.sampler.model,
+        "model": ctx.sampler.model if ctx.sampler is not None else ctx.inputs.model,
         "base_url": ctx.inputs.base_url,
         "num_threads": ctx.num_threads,
         "gen": dataclasses.asdict(ctx.inputs.gen),
         "sgl_eval_version": _SGL_EVAL_VERSION,
         "ns_commit_sha": _read_ns_commit_sha(),
     }
+    run_dir = getattr(ctx, "run_dir", None)
+    if run_dir is not None:
+        meta["run_dir"] = str(run_dir)
+        meta["resumed"] = bool(getattr(ctx, "resume", False))
     # Benchmarks whose dataset is generated (ruler2) are only identified by
     # these -- without them a metrics.json cannot say which setup it scored.
     if ctx.bench_args:
@@ -98,10 +102,15 @@ def _partial_stats(result: RunResult) -> _PartialStats:
     )
 
 
-def _format_partial_summary(result: RunResult, stats: _PartialStats) -> str:
+def _format_partial_summary(
+    result: RunResult, stats: _PartialStats, ctx: Optional[RunContext] = None
+) -> str:
     """``[partial]`` footer: how much ran, and why no baseline comparison."""
-    return (
+    lines = [
         f"\n[partial] {stats.completed_samples} / {stats.planned_samples} "
-        f"samples completed (of {result.planned_examples} examples x {result.n_repeats})\n"
-        "[partial] expected_vs_actual skipped (partial runs aren't comparable to baselines)."
-    )
+        f"samples completed (of {result.planned_examples} examples x {result.n_repeats})",
+        "[partial] expected_vs_actual skipped (partial runs aren't comparable to baselines).",
+    ]
+    if ctx is not None and ctx.spec.resumable:
+        lines.append(f"[partial] re-run the same command with --run-dir {ctx.run_dir} to continue.")
+    return "\n".join(lines)

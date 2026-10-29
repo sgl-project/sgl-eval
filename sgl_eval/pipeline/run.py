@@ -20,6 +20,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             load_examples=ctx.load_examples,
             bench_args=ctx.bench_args,
             prompt_yaml=ctx.prompt_yaml,
+            run_dir=ctx.run_dir,
+            resume=ctx.resume,
+            cancel_event=ctx.cancel_event,
         )
     finally:
         setup.teardown(ctx)

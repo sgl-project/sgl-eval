@@ -17,10 +17,12 @@ an endpoint. Most need nothing.
 | `mmmu_pro` | multichoice | VLM endpoint; MMMU-Pro `standard (10 options)` -- [see below](#mmmu-pro-variants) |
 | `mmmu_pro_vision` | multichoice | VLM endpoint; MMMU-Pro `vision` -- [see below](#mmmu-pro-variants) |
 | `ruler2` | ruler2 | extra install, a required flag, generated data -- [see below](#ruler2) |
+| `deepswe` | harbor | Docker + Compose on this host, a tool-calling endpoint, hours per trial -- [see below](#deepswe) |
 
 All scoring behavior (prompt, answer extraction, grading, pass@k /
-majority@k aggregation) comes from the vendored NeMo-Skills slice, whatever
-the benchmark.
+majority@k aggregation) comes from the vendored NeMo-Skills slice for the
+math and multichoice benchmarks, and from the vendored pier trial runtime
+plus mini-swe-agent for `deepswe`.
 
 ---
 
@@ -242,3 +244,123 @@ explicitly, e.g. `1048576 - 768` to reserve room to answer), and the same
 `--num-examples` is *not* a substitute for `--ruler2-dataset-size`: it slices
 the generated file (NS's `++max_samples`), it does not change what gets
 generated.
+
+---
+
+## deepswe
+
+[DeepSWE](https://github.com/datacurve-ai/deep-swe): 113 long-horizon
+coding-agent tasks from active open-source repositories, in the Harbor task
+format, each with a prebuilt Docker image and hidden tests. The model works
+through [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent)
+(v2.4.6, its stock `mini.yaml` prompt, OpenAI function calling with one
+`bash` tool). The trial lifecycle, patch collection, verifier and reward
+aggregation are the vendored [pier](https://github.com/datacurve-ai/pier)
+runtime at v0.3.1, so a score here follows the same rules as a `pier run`.
+
+The agent loop runs in the sgl-eval process. The task container only executes
+its shell commands, so tasks keep their `no-network` policy and the model
+endpoint is reached from the host, not from inside a sandbox.
+
+### Prerequisites
+
+- **Docker with the Compose v2 plugin** on the machine running sgl-eval
+  (`docker info` and `docker compose version` must work for this user).
+  Budget well over 100 GB of disk for the task images.
+- **A tool-calling endpoint.** The server must return `tool_calls` for
+  requests that carry `tools` (sglang: `--tool-call-parser <name>`, plus
+  `--reasoning-parser` for reasoning models) and hold long contexts: prompts
+  routinely pass 200K tokens, so 393216 is the recommended floor and below
+  131072 sgl-eval refuses to start. Both are checked before the first trial.
+- **Concurrency is trials, not requests.** Every trial owns a task container
+  (2 CPUs / 8 GB by its `task.toml`) and, at the end, a verifier container.
+  The default is `--num-threads 4`; each trial takes one to a few hours.
+
+### Three steps
+
+```bash
+# 1. Does Docker work here? Runs the reference solution, no model involved.
+sgl-eval run deepswe --deepswe-oracle --deepswe-task abs-module-cache-flags
+
+# 2. One real trial against your endpoint.
+sgl-eval run deepswe --base-url http://localhost:30000/v1 --model <model> \
+  --temperature 1.0 --top-p 0.95 --deepswe-task abs-module-cache-flags
+
+# 3. The whole set, resumable.
+sgl-eval run deepswe --base-url http://localhost:30000/v1 --model <model> \
+  --temperature 1.0 --top-p 0.95 --num-threads 4 --run-dir ~/runs/deepswe-<model>
+```
+
+The first run pulls each task's image on demand; a fresh host spends its
+first half hour mostly pulling. Sampling is model-dependent as everywhere in
+sgl-eval; the DeepSeek V4 presets (`--load-preset-from-model-id`) apply here
+too.
+
+### Flags
+
+`sgl-eval run --help` lists them under `deepswe options`.
+
+- `--deepswe-task ID` (repeatable) selects tasks by directory name;
+  `--num-examples N` takes the first `N` alphabetically.
+- `--deepswe-oracle` replays `solution/solve.sh` instead of a model.
+- `--deepswe-agent-timeout-multiplier X` (default 2.0) scales each task's
+  `agent.timeout_sec` (10800 s for DeepSWE). A trial whose agent hits the
+  deadline is still collected and verified.
+- `--deepswe-max-retries N` (default 1) re-runs a trial whose attempt ended
+  in an exception, keeping only the last attempt. pier's exclusions apply:
+  agent and verifier timeouts and reward-file errors are never retried.
+
+### Resuming with `--run-dir`
+
+`--run-dir DIR` makes the run directory explicit. Point a second invocation
+at the same directory with the same command and finished trials are kept
+while the rest run; the header says how many were replayed. The evaluation
+settings (model, sampling, task selection, repeats, timeouts, retry policy)
+are recorded in `run_config.json` and a different configuration is refused.
+`--deepswe-retry-errored` additionally schedules finished-but-errored trials
+again; it is the one flag a resume may change.
+
+`Ctrl-C` cancels the running trials (their containers are stopped), keeps
+what finished, and writes a `partial` `metrics.json`; re-running with the
+same `--run-dir` continues. A second `Ctrl-C` exits immediately and may leave
+containers behind.
+
+### Reading the score
+
+The headline `score` is pier's reward mean over finished trials. A trial's
+reward comes from the verifier's `reward.txt` / `reward.json`; a trial that
+finished without a reward (the agent or verifier raised) counts as 0 in the
+denominator, exactly as pier's `Mean` does. The summary also prints:
+
+- `resolved` (reward 1) and `failed` out of the finished trials;
+- `errored`, how many finished trials carried an exception (they are already
+  inside `failed` or, rarely, `resolved`: an agent that timed out after
+  committing a correct fix still scores 1);
+- `not_run`, planned trials that did not finish (Ctrl-C or a crash); when it
+  is non-zero the run is `partial` and the score is not comparable;
+- `f2p_mean` / `p2p_mean`, the fail-to-pass and pass-to-pass fractions the
+  verifiers report.
+
+Token lines are split: `avg_*_tokens/trial` sum a whole trajectory, and
+`avg_*_tokens/response` average over model responses (format-error retries
+included).
+
+Per trial, `<run-dir>/trials/<task>__rs<n>/` holds pier's canonical
+`result.json`, `agent/mini-swe-agent.trajectory.json`, the collected
+`artifacts/model.patch`, and `verifier/` with `reward.json`, `ctrf.json` and
+the raw test output.
+
+### Matching a pier run
+
+`metrics.json` records the dataset revision, the vendored pier and
+mini-swe-agent commits, every task's image and checksum, the timeouts and the
+retry policy. Two things differ from an agent installed inside the container
+by pier and are worth knowing when comparing numbers:
+
+- sgl-eval sends its sampling fields explicitly (`temperature`, `top_p`,
+  `min_p`, `repetition_penalty`, `reasoning_effort` when set), where litellm
+  dropped `reasoning_effort` for OpenAI-compatible endpoints. Launch the server
+  with the same defaults on both sides.
+- The task container is the pristine task image. pier's installed-agent image
+  additionally installs `curl`, `build-essential`, `git` and a Python for
+  mini-swe-agent, and its shell commands can see `OPENAI_*` variables.

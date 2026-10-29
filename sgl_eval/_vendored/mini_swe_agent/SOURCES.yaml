@@ -1,0 +1,184 @@
+# Manifest for the agent loop vendored from SWE-agent/mini-swe-agent.
+#
+# Edit this file then run `python scripts/sync_vendored.py mini_swe_agent` to
+# refresh the vendored sources. `python scripts/sync_vendored.py --check`
+# verifies the tree is a fresh sync of this manifest.
+#
+# What is vendored: DefaultAgent (the step loop, limits, format-error handling,
+# trajectory serialization), the LitellmModel behavior (history preparation,
+# tool-call parsing, observation formatting, FormatError response retention),
+# LocalEnvironment (observation normalization and the submit sentinel), the
+# tool-call helpers and the `mini.yaml` prompt / observation templates.
+# Provider transport (litellm) is not vendored: sgl-eval supplies `_query`,
+# cost and exception hooks from its own OpenAI client.
+#
+# License: MIT (LICENSE.md).
+
+upstream_repo: SWE-agent/mini-swe-agent
+upstream_package: minisweagent
+upstream_branch: main
+# Tag v2.4.6. pier installs mini-swe-agent unpinned and no release followed
+# 2.4.6 before the DeepSWE reference runs, so this is the version they ran.
+synced_from_sha: a83fcae82d2a08f0ee0c688f9d137b3566c097f8
+synced_at: "2026-09-12"
+
+# pip deps that vendored files actually `import`. Reflected in pyproject.toml.
+# Upstream also depends on litellm, rich, typer, textual, prompt_toolkit,
+# platformdirs, python-dotenv, requests and datasets; none are imported by
+# the vendored subset once the transforms below apply.
+pinned_deps:
+  jinja2: ""                    # agents/default.py, models/utils/actions_toolcall.py
+  pydantic: ">=2"               # config classes
+  tenacity: ""                  # models/utils/retry.py
+
+# Textual rewrites so vendored files resolve under sgl_eval._vendored.mini_swe_agent.
+# The quoted form covers the class-path strings in models/__init__.py.
+import_rewrites:
+  "from minisweagent import": "from sgl_eval._vendored.mini_swe_agent import"
+  "from minisweagent.": "from sgl_eval._vendored.mini_swe_agent."
+  '"minisweagent.': '"sgl_eval._vendored.mini_swe_agent.'
+
+# Transforms:
+#   - package __init__: drop the import-time side effects (global config dir
+#     creation, startup banner, dotenv load) and the rich/dotenv/platformdirs
+#     imports; keep the Protocols, `package_dir` and `__version__`.
+#   - LitellmModel: drop the litellm import, the litellm exception list, the
+#     litellm model-registry hook, `_query` and `_calculate_cost`. The model
+#     is only used through an sgl-eval subclass that supplies `_query`,
+#     `_calculate_cost`, `abort_exceptions` and `_retry` (the retry factory
+#     call is routed through the instance so the subclass can install a
+#     cancellable sleep while reusing the upstream policy).
+#   - LocalEnvironment: route the process launch and the template variables
+#     through instance hooks (`_run`, `_uname`, `_environ`) so the same
+#     `execute` / `_check_finished` / `get_template_vars` run against a
+#     container instead of the host; the host cwd / os.environ reads go away.
+
+files:
+  - src: src/minisweagent/__init__.py
+    dst: __init__.py
+    drop_statements:
+      - text: |
+          import dotenv
+      - text: |
+          from platformdirs import user_config_dir
+      - text: |
+          from rich.console import Console
+      - text: |
+          from minisweagent.utils.log import logger
+      - text: |
+          global_config_dir = Path(os.getenv("MSWEA_GLOBAL_CONFIG_DIR") or user_config_dir("mini-swe-agent"))
+          global_config_dir.mkdir(parents=True, exist_ok=True)
+          global_config_file = Path(global_config_dir) / ".env"
+
+          if not os.getenv("MSWEA_SILENT_STARTUP"):
+              Console().print(
+                  f"This is [bold green]mini-swe-agent[/bold green] version [bold green]{__version__}[/bold green].\n"
+                  f"Check the [bold red]v2 migration guide[/] at [bold red]https://klieret.short.gy/mini-v2-migration[/]\n"
+                  f"Loading global config from [bold green]'{global_config_file}'[/bold green]",
+              )
+          dotenv.load_dotenv(dotenv_path=global_config_file)
+    replace:
+      - old: |
+          __all__ = [
+              "Agent",
+              "Model",
+              "Environment",
+              "package_dir",
+              "__version__",
+              "global_config_file",
+              "global_config_dir",
+              "logger",
+          ]
+        new: |
+          __all__ = [
+              "Agent",
+              "Model",
+              "Environment",
+              "package_dir",
+              "__version__",
+          ]
+  - src: src/minisweagent/exceptions.py
+    dst: exceptions.py
+
+  # --- agent loop ---
+  - src: src/minisweagent/agents/__init__.py
+    dst: agents/__init__.py
+  - src: src/minisweagent/agents/default.py
+    dst: agents/default.py
+
+  # --- model behavior (transport removed) ---
+  - src: src/minisweagent/models/__init__.py
+    dst: models/__init__.py
+  - src: src/minisweagent/models/litellm_model.py
+    dst: models/litellm_model.py
+    drop_statements:
+      - text: |
+          import litellm
+      - text: |
+          if self.config.litellm_model_registry and Path(self.config.litellm_model_registry).is_file():
+              litellm.utils.register_model(json.loads(Path(self.config.litellm_model_registry).read_text()))
+    drop_functions:
+      - _query
+      - _calculate_cost
+    replace:
+      - old: |
+          abort_exceptions: list[type[Exception]] = [
+              litellm.exceptions.UnsupportedParamsError,
+              litellm.exceptions.NotFoundError,
+              litellm.exceptions.PermissionDeniedError,
+              litellm.exceptions.ContextWindowExceededError,
+              litellm.exceptions.AuthenticationError,
+              KeyboardInterrupt,
+          ]
+        new: |
+          abort_exceptions: list[type[Exception]] = [KeyboardInterrupt]
+      - old: |
+          for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
+        new: |
+          for attempt in self._retry(logger=logger, abort_exceptions=self.abort_exceptions):
+  - src: src/minisweagent/models/utils/__init__.py
+    dst: models/utils/__init__.py
+  - src: src/minisweagent/models/utils/actions_toolcall.py
+    dst: models/utils/actions_toolcall.py
+  - src: src/minisweagent/models/utils/anthropic_utils.py
+    dst: models/utils/anthropic_utils.py
+  - src: src/minisweagent/models/utils/cache_control.py
+    dst: models/utils/cache_control.py
+  - src: src/minisweagent/models/utils/openai_multimodal.py
+    dst: models/utils/openai_multimodal.py
+  - src: src/minisweagent/models/utils/retry.py
+    dst: models/utils/retry.py
+
+  # --- environment behavior (process launch routed through hooks) ---
+  - src: src/minisweagent/environments/__init__.py
+    dst: environments/__init__.py
+  - src: src/minisweagent/environments/local.py
+    dst: environments/local.py
+    replace:
+      - old: |
+          cwd = cwd or self.config.cwd or os.getcwd()
+        new: |
+          cwd = cwd or self.config.cwd
+      - old: |
+          result = _run(command, cwd, os.environ | self.config.env, timeout or self.config.timeout)
+        new: |
+          result = self._run(command, cwd, self.config.env, timeout or self.config.timeout)
+      - old: |
+          return recursive_merge(self.config.model_dump(), platform.uname()._asdict(), os.environ, kwargs)
+        new: |
+          return recursive_merge(self.config.model_dump(), self._uname(), self._environ(), kwargs)
+
+  # --- config + utils ---
+  - src: src/minisweagent/config/__init__.py
+    dst: config/__init__.py
+  - src: src/minisweagent/config/mini.yaml
+    dst: config/mini.yaml
+  - src: src/minisweagent/utils/__init__.py
+    dst: utils/__init__.py
+  - src: src/minisweagent/utils/serialize.py
+    dst: utils/serialize.py
+
+  # --- license ---
+  - src: LICENSE.md
+    dst: LICENSE.md
+    binary: true

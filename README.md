@@ -77,7 +77,8 @@ provides it.
 
 `sgl-eval list` for the registered set, `sgl-eval list -v` for each one's
 defaults. See [`benchmarks.md`](benchmarks.md) for the ones that need more
-than an endpoint (today: `ruler2`), and for how to match a NeMo-Skills run.
+than an endpoint (today: `ruler2` and `deepswe`), and for how to match a
+NeMo-Skills run.
 
 ## Presets
 

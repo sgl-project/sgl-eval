@@ -110,6 +110,15 @@ def build_parser() -> argparse.ArgumentParser:
         "<out-dir>/sgl_eval_<name>_<stamp>/ (default: ~/.sgl_eval)",
     )
     p_run.add_argument(
+        "--run-dir",
+        default=None,
+        metavar="DIR",
+        help="write into this exact directory instead of <out-dir>/sgl_eval_<name>_<stamp>/. "
+        "For benchmarks that keep per-trial state on disk (deepswe), pointing at an "
+        "existing run dir resumes it: finished trials are kept, the rest run; a changed "
+        "configuration is refused.",
+    )
+    p_run.add_argument(
         "--no-dump-predictions",
         dest="dump_predictions",
         action="store_false",

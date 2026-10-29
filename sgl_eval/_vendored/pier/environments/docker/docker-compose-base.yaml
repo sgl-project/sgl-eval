@@ -1,0 +1,7 @@
+# Vendored from datacurve-ai/pier@0c802fc067a425345b24d1c69411aa98acf61a1d
+# Source: src/pier/environments/docker/docker-compose-base.yaml
+# DO NOT EDIT directly. To upgrade, edit SOURCES.yaml and rerun
+# `python scripts/sync_vendored.py`.
+
+services:
+  main: {}
