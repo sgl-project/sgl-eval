@@ -67,10 +67,10 @@ def render_prompt(
     cfg = yaml.safe_load(yaml_path.read_text())
     user_template: str = cfg["user"]
 
-    if few_shot_examples and "{examples}" not in user_template:
+    if few_shot_examples and not ("{examples}" in user_template and cfg.get("few_shot_examples")):
         raise ValueError(
-            f"{yaml_path} has no {{examples}} slot, so the benchmark's few-shot examples "
-            "would be dropped; pass --num-shots 0 to run it zero-shot"
+            f"{yaml_path} has no {{examples}} slot or few_shot_examples block, so the "
+            "benchmark's few-shot examples would be dropped; pass --num-shots 0 to run it zero-shot"
         )
     fmt: dict = {"problem": problem, **extra_fields}
     if "{examples}" in user_template:

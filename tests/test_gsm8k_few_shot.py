@@ -127,6 +127,21 @@ def test_default_examples_with_prompt_lacking_examples_slot_fail(tmp_path):
         )
 
 
+def test_default_examples_with_slot_but_no_examples_block_fail(tmp_path):
+    own = tmp_path / "custom.yaml"
+    own.write_text("user: |-\n  {examples}{problem}\n")
+    with pytest.raises(ValueError, match="--num-shots 0"):
+        get("gsm8k").run(
+            sampler=_PromptCapturingSampler(),
+            gen=GenConfig(),
+            n_repeats=1,
+            num_examples=1,
+            num_threads=1,
+            load_examples=_one_example_loader,
+            prompt_yaml=own,
+        )
+
+
 def test_num_shots_zero_prompt_matches_main_zero_shot_prompt():
     # Byte-identical to the pre-few-shot rendering of generic/math.
     from sgl_eval.evals._prompts import render_prompt, vendored_prompt
