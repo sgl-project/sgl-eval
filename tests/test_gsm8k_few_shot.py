@@ -81,3 +81,54 @@ def test_benchmarks_without_examples_reject_num_shots():
 
 def test_aime_stays_zero_shot():
     assert "Problem:\n" not in _render(benchmark="aime25")
+
+
+def test_negative_num_shots_is_rejected():
+    with pytest.raises(ValueError, match="must be >= 0"):
+        _render(num_shots=-1)
+
+
+def test_metrics_json_records_effective_num_shots(tmp_path):
+    import json
+
+    from sgl_eval.metrics import dump_run
+
+    def recorded(num_shots=None, benchmark="gsm8k"):
+        kwargs = {} if num_shots is None else {"num_shots": num_shots}
+        result = get(benchmark).run(
+            sampler=_PromptCapturingSampler(),
+            gen=GenConfig(),
+            n_repeats=1,
+            num_examples=1,
+            num_threads=1,
+            load_examples=_one_example_loader,
+            **kwargs,
+        )
+        return json.loads(dump_run(result, tmp_path).read_text()).get("num_shots")
+
+    assert recorded() == 8  # the default is recorded too
+    assert recorded(3) == 3
+    assert recorded(0) == 0
+    assert recorded(benchmark="aime25") is None
+
+
+def test_default_examples_with_prompt_lacking_examples_slot_fail(tmp_path):
+    own = tmp_path / "custom.yaml"
+    own.write_text("user: |-\n  {problem}\n")
+    with pytest.raises(ValueError, match="--num-shots 0"):
+        get("gsm8k").run(
+            sampler=_PromptCapturingSampler(),
+            gen=GenConfig(),
+            n_repeats=1,
+            num_examples=1,
+            num_threads=1,
+            load_examples=_one_example_loader,
+            prompt_yaml=own,
+        )
+
+
+def test_num_shots_zero_prompt_matches_main_zero_shot_prompt():
+    # Byte-identical to the pre-few-shot rendering of generic/math.
+    from sgl_eval.evals._prompts import render_prompt, vendored_prompt
+
+    assert _render(num_shots=0) == render_prompt(vendored_prompt("math"), problem="Find n.")

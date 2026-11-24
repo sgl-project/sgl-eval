@@ -66,8 +66,6 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
     num_threads = args.num_threads if args.num_threads is not None else spec.default_num_threads
     prompt_yaml = _resolve_prompt_override(getattr(args, "prompt", None))
     num_shots = getattr(args, "num_shots", None)
-    if num_shots is not None and num_shots < 0:
-        raise ValueError(f"--num-shots must be >= 0, got {num_shots}")
 
     return RunContext(
         inputs=inputs,

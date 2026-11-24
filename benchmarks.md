@@ -245,13 +245,29 @@ generated.
 
 ## gsm8k few-shot
 
-`gsm8k` prepends NeMo-Skills' `gsm8k_standard_few_shot` (the 8 CoT-paper
-examples lm-eval's `gsm8k-cot` task uses) inside the `generic/math` prompt.
+**Default change:** `gsm8k` used to run zero-shot; it now prepends 8 worked
+examples by default, so its scores are not comparable with earlier sgl-eval
+`gsm8k` records. `--num-shots 0` reproduces the old zero-shot prompt.
+
+The examples are NeMo-Skills' `gsm8k_standard_few_shot`: the 8 problems of the
+CoT paper (Table 20), the same set lm-eval's `gsm8k-cot` task uses, with the
+solutions rewritten to end in `\boxed{}`. They fill the `{examples}` slot of the
+`generic/math` prompt.
+
 The zero-shot wording alone ("put the answer (and only answer) inside
-\boxed{}") makes reasoning models such as Qwen3.5-397B-A17B loop on the
-answer format inside their reasoning until `max_tokens`: on the same server
-(4x GB300, `max_tokens 16384`, T=0.6) it truncates 7-28% of samples and scores
-0.90-0.95, while the 8-shot prompt truncates <=0.5% and scores 0.975-0.985,
-matching sglang's 5-shot `run_eval` number. `--num-shots N` trims the set,
-`--num-shots 0` restores the zero-shot prompt; the value is recorded in
-`metrics.json` because scores are not comparable across it.
+\boxed{}") makes reasoning models such as Qwen3.5-397B-A17B keep re-checking the
+answer format until `max_tokens`. One measurement (same server, 4x GB300,
+200 examples, `max_tokens 16384`, T=0.6, same scorer):
+
+| prompt | thinking | score | truncated |
+|---|---|---|---|
+| zero-shot | on | 0.945 | 7.0% |
+| zero-shot | off | 0.890 | 0.0% |
+| 8-shot | on | 0.975 | 2.0% |
+| 8-shot | off | 0.985 | 0.0% |
+
+sglang's 5-shot chat `run_eval` on the same server scores 0.985.
+
+`--num-shots N` uses the first N examples; the effective count is always
+recorded in `metrics.json` (`num_shots`) because scores are not comparable
+across it. `--prompt` yamls without an `{examples}` slot need `--num-shots 0`.

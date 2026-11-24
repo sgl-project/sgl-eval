@@ -98,6 +98,8 @@ class RunResult:
     total_prompt_tokens: int = 0
     partial: bool = False
     planned_examples: int = 0
+    # In-context examples actually rendered; None for benchmarks that ship none.
+    num_shots: Optional[int] = None
 
     @property
     def output_throughput(self) -> float:

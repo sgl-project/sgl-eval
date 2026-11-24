@@ -213,6 +213,8 @@ def _math_run(
     ):
         examples = default_examples
         if num_shots is not None:
+            if num_shots < 0:
+                raise ValueError(f"--num-shots must be >= 0, got {num_shots}")
             if num_shots and not default_examples:
                 raise ValueError(f"{name} ships no few-shot examples; --num-shots is not supported")
             if num_shots > len(default_examples):
@@ -221,7 +223,7 @@ def _math_run(
                     "vendored examples"
                 )
             examples = default_examples[:num_shots]
-        return run_math_benchmark(
+        result = run_math_benchmark(
             name=name,
             sampler=sampler,
             gen=gen,
@@ -233,6 +235,9 @@ def _math_run(
             few_shot_examples=examples or None,
             predictions_writer=predictions_writer,
         )
+        if default_examples:
+            result.num_shots = len(examples)
+        return result
 
     return run
 
