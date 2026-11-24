@@ -17,6 +17,21 @@ _VENDORED_PROMPT_DIR = (
 _SE_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
 
+def load_few_shot_examples(spec: str) -> list:
+    """Resolve ``"<module>:<name>"`` (relative to the vendored
+    ``nemo_skills.prompt.few_shot_examples`` package) to its list of
+    ``{"problem", "solution"}`` dicts."""
+    import importlib
+
+    module_name, _, attr = spec.partition(":")
+    if not module_name or not attr:
+        raise ValueError(f"few_shot_examples spec must be '<module>:<name>', got {spec!r}")
+    module = importlib.import_module(
+        f"sgl_eval._vendored.nemo_skills.prompt.few_shot_examples.{module_name}"
+    )
+    return list(getattr(module, attr))
+
+
 def vendored_prompt(name: str) -> Path:
     """Return the path to a vendored prompt yaml by basename (no extension)."""
     return _VENDORED_PROMPT_DIR / f"{name}.yaml"
@@ -52,6 +67,11 @@ def render_prompt(
     cfg = yaml.safe_load(yaml_path.read_text())
     user_template: str = cfg["user"]
 
+    if few_shot_examples and not ("{examples}" in user_template and cfg.get("few_shot_examples")):
+        raise ValueError(
+            f"{yaml_path} has no {{examples}} slot or few_shot_examples block, so the "
+            "benchmark's few-shot examples would be dropped; pass --num-shots 0 to run it zero-shot"
+        )
     fmt: dict = {"problem": problem, **extra_fields}
     if "{examples}" in user_template:
         examples_text = ""

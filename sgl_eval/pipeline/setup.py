@@ -36,6 +36,8 @@ class RunContext:
     bench_args: Dict[str, Any]
     # None means "the benchmark's registered prompt"; set only by --prompt.
     prompt_yaml: Optional[Path]
+    # None means "the benchmark's registered example count"; set only by --num-shots.
+    num_shots: Optional[int]
     _prev_sigint_handler: Any
 
 
@@ -63,6 +65,7 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
 
     num_threads = args.num_threads if args.num_threads is not None else spec.default_num_threads
     prompt_yaml = _resolve_prompt_override(getattr(args, "prompt", None))
+    num_shots = getattr(args, "num_shots", None)
 
     return RunContext(
         inputs=inputs,
@@ -76,6 +79,7 @@ def prepare_run(args: argparse.Namespace) -> RunContext:
         load_examples=load_examples,
         bench_args=_collect_bench_args(args, spec.name),
         prompt_yaml=prompt_yaml,
+        num_shots=num_shots,
         _prev_sigint_handler=prev_sigint,
     )
 

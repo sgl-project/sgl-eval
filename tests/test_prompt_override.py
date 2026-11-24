@@ -59,8 +59,9 @@ def _one_example_loader(_num_examples):
     return [Example(id="p1", inputs={"problem": "Find n."}, target="42")]
 
 
-@pytest.mark.parametrize("benchmark", ["aime25", "gsm8k"])
-def test_prompt_override_reaches_the_math_sampler(benchmark):
+# gsm8k's default examples need an {examples} slot, which matharena-aime lacks.
+@pytest.mark.parametrize("benchmark,extra", [("aime25", {}), ("gsm8k", {"num_shots": 0})])
+def test_prompt_override_reaches_the_math_sampler(benchmark, extra):
     sampler = _PromptCapturingSampler()
     get(benchmark).run(
         sampler=sampler,
@@ -70,6 +71,7 @@ def test_prompt_override_reaches_the_math_sampler(benchmark):
         num_threads=1,
         load_examples=_one_example_loader,
         prompt_yaml=resolve_prompt("matharena-aime"),
+        **extra,
     )
     assert sampler.prompts and "integer between 0 and 999" in sampler.prompts[0]
 

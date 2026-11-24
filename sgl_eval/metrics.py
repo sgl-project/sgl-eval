@@ -34,6 +34,10 @@ def dump_run(
         "token_usage": _token_usage(result),
         "aggregate": result.aggregate,
     }
+    # A different number of in-context examples is a different question, so the
+    # effective count is recorded even when it is the benchmark default.
+    if result.num_shots is not None:
+        payload["num_shots"] = result.num_shots
     if run_meta:
         # Reject overlap with core fields so a future caller can't silently
         # clobber ``aggregate`` / ``name`` / etc. by reusing those keys.
