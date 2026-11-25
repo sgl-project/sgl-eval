@@ -100,6 +100,19 @@ def test_list_presets_finds_yaml_and_yml(tmp_path: Path, monkeypatch: pytest.Mon
     assert "a.yaml" in found
     assert "b.yml" in found
     assert "ignore.txt" not in found
+    assert load_preset("a").benchmark == "x"
+    assert load_preset("b").benchmark == "y"
+
+
+def test_named_preset_prefers_yaml_when_both_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("sgl_eval.preset.PRESET_ROOT", tmp_path)
+    (tmp_path / "example.yaml").write_text("benchmark: yaml")
+    yml_path = tmp_path / "example.yml"
+    yml_path.write_text("benchmark: yml")
+    assert load_preset("example").benchmark == "yaml"
+    assert load_preset(str(yml_path)).benchmark == "yml"
 
 
 def test_pick_first_non_none_wins() -> None:

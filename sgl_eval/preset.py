@@ -98,7 +98,11 @@ def resolve_preset_path(spec: str) -> Path:
     """Resolve names under PRESET_ROOT; slashes and YAML suffixes denote paths."""
     if "/" in spec or spec.endswith((".yaml", ".yml")):
         return Path(spec).expanduser()
-    return PRESET_ROOT / f"{spec}.yaml"
+    yaml_path = PRESET_ROOT / f"{spec}.yaml"
+    yml_path = yaml_path.with_suffix(".yml")
+    if not yaml_path.exists() and yml_path.is_file():
+        return yml_path
+    return yaml_path
 
 
 def load_preset(spec: str) -> Preset:
@@ -123,7 +127,7 @@ def add_preset_run_flag(p_run: argparse.ArgumentParser) -> None:
     p_run.add_argument(
         "--preset",
         default=None,
-        help="preset name (under ~/.sgl_eval/presets/) or path to a preset .yaml; "
+        help="preset name (under ~/.sgl_eval/presets/) or path to a YAML file; "
         "CLI flags always override preset values",
     )
 
