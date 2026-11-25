@@ -60,7 +60,9 @@ complete priority is:
 ## User presets
 
 Save a `(benchmark, endpoint, sampling, n_repeats, expected)` bundle to
-`~/.sgl_eval/presets/<name>.yaml` and replay it with `--preset <name>`.
+`~/.sgl_eval/presets/<name>.yaml` or `~/.sgl_eval/presets/<name>.yml` and replay it
+with `--preset <name>`. If both files exist, the `.yaml` file takes precedence
+when you use the preset name.
 CLI flags always override preset values, so a preset is a starting point,
 not a lock.
 
